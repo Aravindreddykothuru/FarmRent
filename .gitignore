@@ -1,0 +1,32 @@
+# Environment variables — never commit
+.env
+.env.local
+.env.production
+.env.*
+!**/.env.example
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Build artifacts
+.next/
+dist/
+build/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.suo
+*.user

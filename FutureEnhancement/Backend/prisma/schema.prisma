@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String
+  email         String    @unique
+  phone         String?
+  password_hash String
+  role          Role      @default(FARMER)
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  equipment     Equipment[]
+  bookings      Booking[]
+  reviews       Review[]
+
+  @@map("users")
+}
+
+enum Role {
+  FARMER
+  OWNER
+  ADMIN
+}
+
+model EquipmentCategory {
+  id          String      @id @default(uuid())
+  name        String      @unique
+  description String?     @db.Text
+  
+  equipment   Equipment[]
+
+  @@map("equipment_categories")
+}
+
+model Equipment {
+  id            String    @id @default(uuid())
+  ownerId       String    @map("owner_id")
+  name          String
+  categoryId    String    @map("category_id")
+  description   String    @db.Text
+  pricePerHour  Decimal?  @db.Decimal(10, 2) @map("price_per_hour")
+  pricePerDay   Decimal   @db.Decimal(10, 2) @map("price_per_day")
+  latitude      Float
+  longitude     Float
+  address       String    @db.Text
+  status        EquipmentStatus @default(AVAILABLE)
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  owner         User      @relation(fields: [ownerId], references: [id])
+  category      EquipmentCategory @relation(fields: [categoryId], references: [id])
+  bookings      Booking[]
+
+  // Note: PostGIS geometry column will be added via raw SQL migration
+  // for advanced spatial queries (ST_DWithin).
+
+  @@map("equipment")
+}
+
+enum EquipmentStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+  UNAVAILABLE
+}
+
+model Booking {
+  id            String    @id @default(uuid())
+  farmerId      String    @map("farmer_id")
+  equipmentId   String    @map("equipment_id")
+  startTime     DateTime  @map("start_time")
+  endTime       DateTime  @map("end_time")
+  status        BookingStatus @default(PENDING)
+  totalPrice    Decimal   @db.Decimal(10, 2) @map("total_price")
+  paymentStatus PaymentStatus @default(PENDING) @map("payment_status")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  farmer        User      @relation(fields: [farmerId], references: [id])
+  equipment     Equipment @relation(fields: [equipmentId], references: [id])
+  payment       Payment?
+  review        Review?
+
+  @@map("bookings")
+}
+
+enum BookingStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id             String    @id @default(uuid())
+  bookingId      String    @unique @map("booking_id")
+  paymentGateway PaymentGateway @map("payment_gateway")
+  amount         Decimal   @db.Decimal(10, 2)
+  paymentStatus  PaymentStatus @default(PENDING) @map("payment_status")
+  transactionId  String?   @unique @map("transaction_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  booking        Booking   @relation(fields: [bookingId], references: [id])
+
+  @@map("payments")
+}
+
+enum PaymentGateway {
+  RAZORPAY
+  STRIPE
+}
+
+model Review {
+  id          String   @id @default(uuid())
+  bookingId   String   @unique @map("booking_id")
+  reviewerId  String   @map("reviewer_id")
+  rating      Int      @db.SmallInt
+  reviewText  String?  @db.Text @map("review_text")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+  reviewer    User     @relation(fields: [reviewerId], references: [id])
+
+  @@map("reviews")
+}

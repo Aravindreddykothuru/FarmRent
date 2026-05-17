@@ -1,0 +1,196 @@
+const Booking = require('../models/Booking');
+const logger = require('../utils/logger');
+
+/**
+ * Dynamic Pricing Engine
+ * Calculates rental price based on multiple factors
+ */
+class PricingEngine {
+  /**
+   * Main pricing calculation
+   */
+  static async calculate(machine, bookingParams) {
+    const {
+      startDate,
+      endDate,
+      startTime,
+      endTime,
+      needsOperator = false,
+      needsFuel = false,
+      needsTransport = false,
+      distanceKm = 0,
+    } = bookingParams;
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    // Calculate duration
+    const totalDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+    const totalHours = this._calculateHours(startTime, endTime, totalDays);
+
+    // Base charge calculation
+    const baseCharge = this._calculateBaseCharge(machine.pricing, totalHours, totalDays);
+
+    // Seasonal multiplier
+    const seasonalMultiplier = this._getSeasonalMultiplier(start, end);
+
+    // Demand multiplier (based on current booking density)
+    const demandMultiplier = await this._getDemandMultiplier(machine._id, start, end);
+
+    // Additional charges
+    const operatorCharge = needsOperator
+      ? (machine.pricing.operatorChargePerDay || 0) * totalDays
+      : 0;
+
+    const fuelCharge = needsFuel
+      ? this._estimateFuelCharge(machine, totalHours)
+      : 0;
+
+    const transportCharge = needsTransport
+      ? (machine.pricing.transportChargePerKm || 0) * distanceKm
+      : 0;
+
+    const securityDeposit = machine.pricing.securityDeposit || 0;
+
+    // Tax (18% GST)
+    const subtotal =
+      baseCharge * seasonalMultiplier * demandMultiplier +
+      operatorCharge +
+      fuelCharge +
+      transportCharge;
+
+    const taxRate = 0.18;
+    const taxAmount = parseFloat((subtotal * taxRate).toFixed(2));
+    const totalAmount = parseFloat((subtotal + taxAmount).toFixed(2));
+    const finalAmount = parseFloat((totalAmount + securityDeposit).toFixed(2));
+
+    return {
+      totalHours: parseFloat(totalHours.toFixed(2)),
+      totalDays,
+      pricing: {
+        baseCharge: parseFloat(baseCharge.toFixed(2)),
+        operatorCharge: parseFloat(operatorCharge.toFixed(2)),
+        fuelCharge: parseFloat(fuelCharge.toFixed(2)),
+        transportCharge: parseFloat(transportCharge.toFixed(2)),
+        seasonalMultiplier: parseFloat(seasonalMultiplier.toFixed(2)),
+        demandMultiplier: parseFloat(demandMultiplier.toFixed(2)),
+        discountAmount: 0,
+        taxAmount,
+        securityDeposit,
+        totalAmount,
+        finalAmount,
+        pricingSnapshot: {
+          baseRatePerHour: machine.pricing.baseRatePerHour,
+          baseRatePerDay: machine.pricing.baseRatePerDay,
+          calculatedAt: new Date(),
+        },
+      },
+    };
+  }
+
+  /**
+   * Calculate hours from time strings over multiple days
+   */
+  static _calculateHours(startTime, endTime, totalDays) {
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    const hoursPerDay = (eh * 60 + em - (sh * 60 + sm)) / 60;
+    return Math.max(hoursPerDay * totalDays, 0);
+  }
+
+  /**
+   * Determine whether to charge hourly or daily (whichever is more economical for customer)
+   */
+  static _calculateBaseCharge(pricing, totalHours, totalDays) {
+    const hourlyTotal = totalHours * pricing.baseRatePerHour;
+    const dailyTotal = totalDays * pricing.baseRatePerDay;
+
+    // Use daily rate for bookings >= 8 hours/day, otherwise hourly
+    const avgHoursPerDay = totalHours / totalDays;
+    return avgHoursPerDay >= 8
+      ? Math.min(hourlyTotal, dailyTotal)
+      : hourlyTotal;
+  }
+
+  /**
+   * Seasonal pricing multiplier
+   * Kharif season (June-October): peak
+   * Rabi season (Oct-March): moderate peak
+   * Summer (March-June): low demand
+   */
+  static _getSeasonalMultiplier(startDate, endDate) {
+    const month = startDate.getMonth() + 1; // 1-12
+
+    if (month >= 6 && month <= 10) {
+      // Kharif - peak season
+      return parseFloat(process.env.PEAK_SEASON_MULTIPLIER) || 1.5;
+    } else if (month >= 11 || month <= 3) {
+      // Rabi - moderate
+      return 1.2;
+    } else {
+      // Summer - off season
+      return parseFloat(process.env.OFF_SEASON_MULTIPLIER) || 0.8;
+    }
+  }
+
+  /**
+   * Demand-based pricing: higher bookings in same period = higher price
+   */
+  static async _getDemandMultiplier(machineId, startDate, endDate) {
+    try {
+      // Count bookings in same region/period for similar machines (simplified)
+      const recentBookings = await Booking.countDocuments({
+        machine: machineId,
+        startDate: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+        status: { $in: ['confirmed', 'active', 'completed'] },
+      });
+
+      if (recentBookings >= 15) return 1.3; // High demand
+      if (recentBookings >= 8) return 1.15;  // Moderate demand
+      if (recentBookings >= 3) return 1.0;   // Normal
+      return 0.95; // Low demand discount
+    } catch (err) {
+      logger.error('Demand multiplier calculation error:', err);
+      return 1.0; // Fallback to neutral
+    }
+  }
+
+  /**
+   * Estimate fuel charge based on machine type and hours
+   */
+  static _estimateFuelCharge(machine, totalHours) {
+    const fuelConsumptionPerHour = {
+      tractor: 4,       // litres/hour
+      harvester: 8,
+      plough: 3,
+      seeder: 2,
+      irrigation_pump: 1.5,
+      thresher: 3,
+      cultivator: 3,
+      rotavator: 3,
+      sprayer: 1,
+      other: 3,
+    };
+
+    const fuelPricePerLitre = 95; // INR, can be made dynamic
+    const consumption = fuelConsumptionPerHour[machine.type] || 3;
+    return consumption * totalHours * fuelPricePerLitre;
+  }
+
+  /**
+   * Apply discount coupon/negotiation
+   */
+  static applyDiscount(pricing, discountPercent, discountReason) {
+    const discountAmount = parseFloat(
+      ((pricing.totalAmount * discountPercent) / 100).toFixed(2)
+    );
+    return {
+      ...pricing,
+      discountAmount,
+      discountReason,
+      finalAmount: parseFloat((pricing.totalAmount - discountAmount + pricing.securityDeposit).toFixed(2)),
+    };
+  }
+}
+
+module.exports = PricingEngine;

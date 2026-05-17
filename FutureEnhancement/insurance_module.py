@@ -1,0 +1,71 @@
+# insurance_module.py
+from datetime import datetime
+import random
+import string
+from typing import Dict
+
+class InsuranceModule:
+    def __init__(self):
+        self.policies = {}
+        self.claims = {}
+    
+    def generate_policy_number(self) -> str:
+        return f"POL-{datetime.utcnow().strftime('%Y%m%d')}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
+    
+    def generate_claim_number(self) -> str:
+        return f"CLM-{datetime.utcnow().strftime('%Y%m%d')}-{''.join(random.choices(string.digits, k=8))}"
+    
+    def calculate_risk_score(self, user_id: int) -> float:
+        """Calculate user risk score (0-1 scale)"""
+        base_score = 0.5
+        adjusted = base_score + random.uniform(-0.2, 0.2)
+        return round(min(1.0, max(0.0, adjusted)), 3)
+    
+    def create_policy(self, user_id: int, policy_type: str, 
+                     coverage_amount: float, premium_amount: float,
+                     start_date: str, end_date: str) -> Dict:
+        policy = {
+            'policy_number': self.generate_policy_number(),
+            'user_id': user_id,
+            'policy_type': policy_type,  # basic, standard, premium
+            'coverage_amount': coverage_amount,
+            'premium_amount': premium_amount,
+            'status': 'active',
+            'risk_score': self.calculate_risk_score(user_id),
+            'start_date': start_date,
+            'end_date': end_date,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        self.policies[policy['policy_number']] = policy
+        return policy
+    
+    def create_claim(self, policy_number: str, description: str, 
+                    amount_claimed: float) -> Dict:
+        if policy_number not in self.policies:
+            return {'error': 'Policy not found'}
+        
+        claim = {
+            'claim_number': self.generate_claim_number(),
+            'policy_number': policy_number,
+            'description': description,
+            'amount_claimed': amount_claimed,
+            'status': 'pending',
+            'created_at': datetime.utcnow().isoformat()
+        }
+        self.claims[claim['claim_number']] = claim
+        return claim
+    
+    def approve_claim(self, claim_number: str) -> Dict:
+        if claim_number not in self.claims:
+            return {'error': 'Claim not found'}
+        
+        self.claims[claim_number]['status'] = 'approved'
+        self.claims[claim_number]['approved_at'] = datetime.utcnow().isoformat()
+        return self.claims[claim_number]
+    
+    def update_policy_risk(self, policy_number: str, new_risk_score: float) -> Dict:
+        if policy_number not in self.policies:
+            return {'error': 'Policy not found'}
+        
+        self.policies[policy_number]['risk_score'] = new_risk_score
+        return self.policies[policy_number]

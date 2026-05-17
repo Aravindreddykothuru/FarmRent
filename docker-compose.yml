@@ -1,0 +1,90 @@
+version: '3.9'
+
+services:
+  # ─── Database (PostgreSQL + PostGIS) ────────────────────────────────────────
+  db:
+    image: postgis/postgis:15-3.3
+    restart: always
+    environment:
+      POSTGRES_USER: farmrent_admin
+      POSTGRES_PASSWORD: farmrent_password
+      POSTGRES_DB: farmrent_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U farmrent_admin -d farmrent_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Database UI (pgAdmin) ──────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@farmrent.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ─── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Node.js Backend ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file: ./Backend/.env
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      FLASK_URL: http://flask:5001
+    depends_on:
+      redis:
+        condition: service_healthy
+      flask:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─── Flask Micro-service ────────────────────────────────────────────────────
+  flask:
+    build:
+      context: ./FutureEnhancement
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    env_file: ./FutureEnhancement/.env
+    environment:
+      FLASK_ENV: production
+      FLASK_PORT: "5001"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5001/api/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

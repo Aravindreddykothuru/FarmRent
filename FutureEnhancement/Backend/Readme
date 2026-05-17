@@ -1,0 +1,234 @@
+# 🌾 Farm Machine Rental API
+
+A production-grade RESTful API for a farm machine rental platform with JWT auth, RBAC, dynamic pricing, conflict detection, and ML integration.
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your MongoDB URI and secrets
+
+# 3. Seed database (optional)
+npm run seed
+
+# 4. Start development server
+npm run dev
+
+# 5. Start production server
+npm start
+```
+
+---
+
+## 🏗️ Architecture
+
+```
+src/
+├── config/
+│   └── database.js          # MongoDB connection
+├── controllers/
+│   ├── authController.js    # Auth & token management
+│   ├── machineController.js # Machine CRUD + availability
+│   ├── bookingController.js # Full booking workflow
+│   ├── paymentController.js # Payment processing
+│   ├── adminController.js   # Admin control panel
+│   └── mlController.js      # ML/AI integration APIs
+├── middleware/
+│   ├── auth.js              # JWT + RBAC middleware
+│   ├── validation.js        # express-validator rules
+│   ├── errorHandler.js      # Global error handler
+│   └── logger.js            # Activity logging
+├── models/
+│   ├── User.js              # Users (Farmer/Owner/Admin)
+│   ├── Machine.js           # Machine listings + availability
+│   ├── Booking.js           # Bookings with workflow states
+│   ├── Payment.js           # Payment records
+│   └── Log.js               # Audit logs
+├── routes/
+│   ├── auth.js
+│   ├── machines.js
+│   ├── bookings.js
+│   ├── payments.js
+│   ├── admin.js
+│   └── ml.js
+├── services/
+│   ├── pricingEngine.js     # Dynamic pricing calculator
+│   └── availabilityService.js # Conflict detection
+└── utils/
+    ├── helpers.js           # JWT, pagination, distance utils
+    ├── logger.js            # Winston daily-rotate logger
+    ├── cronJobs.js          # Background automation tasks
+    └── seeder.js            # Test data seeder
+```
+
+---
+
+## 👥 Roles & Permissions (RBAC)
+
+| Action                  | Farmer | Owner | Admin |
+|------------------------|--------|-------|-------|
+| Register / Login        | ✅     | ✅    | ✅    |
+| Browse machines         | ✅     | ✅    | ✅    |
+| Create booking          | ✅     | ❌    | ✅    |
+| Approve/reject booking  | ❌     | ✅    | ✅    |
+| Create machine listing  | ❌     | ✅    | ✅    |
+| Approve machine listing | ❌     | ❌    | ✅    |
+| Process refund          | ❌     | ❌    | ✅    |
+| View analytics          | ❌     | ❌    | ✅    |
+| ML demand prediction    | ❌     | ✅    | ✅    |
+| ML recommendations      | ✅     | ❌    | ✅    |
+| View audit logs         | ❌     | ❌    | ✅    |
+
+---
+
+## 📡 API Endpoints
+
+### Auth — `/api/v1/auth`
+| Method | Endpoint              | Access  | Description             |
+|--------|-----------------------|---------|-------------------------|
+| POST   | `/register`           | Public  | Register user           |
+| POST   | `/login`              | Public  | Login + get JWT tokens  |
+| POST   | `/refresh-token`      | Public  | Refresh access token    |
+| POST   | `/logout`             | Private | Invalidate refresh token|
+| GET    | `/me`                 | Private | Get current user        |
+| PUT    | `/change-password`    | Private | Change password         |
+
+### Machines — `/api/v1/machines`
+| Method | Endpoint                      | Access       | Description                     |
+|--------|-------------------------------|--------------|----------------------------------|
+| GET    | `/`                           | Public       | List machines (filters + geo)    |
+| POST   | `/`                           | Owner        | Create machine listing           |
+| GET    | `/:id`                        | Public       | Get machine details              |
+| PUT    | `/:id`                        | Owner/Admin  | Update machine                   |
+| DELETE | `/:id`                        | Owner/Admin  | Soft delete machine              |
+| GET    | `/:id/availability`           | Public       | Get availability calendar        |
+| POST   | `/:id/price-estimate`         | Farmer       | Calculate booking price          |
+| PATCH  | `/:id/approve`                | Admin        | Approve/reject listing           |
+| POST   | `/:id/block-dates`            | Owner/Admin  | Block dates for maintenance      |
+
+### Bookings — `/api/v1/bookings`
+| Method | Endpoint              | Access       | Description                     |
+|--------|-----------------------|--------------|----------------------------------|
+| POST   | `/`                   | Farmer       | Create booking (conflict check)  |
+| GET    | `/`                   | Private      | List bookings (by role)          |
+| GET    | `/:id`                | Involved     | Get booking details              |
+| PATCH  | `/:id/review`         | Owner/Admin  | Approve or reject booking        |
+| PATCH  | `/:id/cancel`         | Farmer/Admin | Cancel booking                   |
+| PATCH  | `/:id/activate`       | Owner/Admin  | Mark booking as started          |
+| PATCH  | `/:id/complete`       | Owner/Admin  | Mark booking as completed        |
+| POST   | `/:id/review`         | Farmer/Owner | Submit rating + review           |
+
+### Payments — `/api/v1/payments`
+| Method | Endpoint              | Access  | Description              |
+|--------|-----------------------|---------|--------------------------|
+| POST   | `/`                   | Farmer  | Initiate payment         |
+| GET    | `/`                   | Private | Payment history          |
+| PATCH  | `/:id/status`         | Admin   | Update payment status    |
+| POST   | `/:id/refund`         | Admin   | Process refund           |
+
+### Admin — `/api/v1/admin`
+| Method | Endpoint                         | Access | Description              |
+|--------|----------------------------------|--------|--------------------------|
+| GET    | `/dashboard`                     | Admin  | Platform stats overview  |
+| GET    | `/users`                         | Admin  | List all users           |
+| PATCH  | `/users/:id`                     | Admin  | Modify user account      |
+| GET    | `/analytics`                     | Admin  | Platform analytics       |
+| GET    | `/logs`                          | Admin  | Audit logs               |
+| PATCH  | `/bookings/:id/force-cancel`     | Admin  | Force cancel booking     |
+| GET    | `/reports/financial`             | Admin  | Financial report         |
+
+### ML Integration — `/api/v1/ml`
+| Method | Endpoint              | Access       | Description                    |
+|--------|-----------------------|--------------|--------------------------------|
+| GET    | `/demand-prediction`  | Owner/Admin  | Demand forecast next N days    |
+| GET    | `/recommendations`    | Farmer       | Personalized machine recs      |
+| POST   | `/optimal-pricing`    | Owner/Admin  | Suggest optimal listing price  |
+| GET    | `/churn-risk`         | Admin        | Farmer churn risk analysis     |
+
+---
+
+## 🔐 Authentication
+
+All protected routes require:
+```
+Authorization: Bearer <access_token>
+```
+
+Token refresh:
+```json
+POST /api/v1/auth/refresh-token
+{ "refreshToken": "<refresh_token>" }
+```
+
+---
+
+## 💰 Dynamic Pricing Engine
+
+Pricing is calculated as:
+```
+finalAmount = (baseCharge × seasonalMultiplier × demandMultiplier
+              + operatorCharge + fuelCharge + transportCharge)
+              × (1 + taxRate) + securityDeposit
+```
+
+**Seasonal Multipliers:**
+- Kharif season (Jun–Oct): 1.5× (peak)
+- Rabi season (Nov–Mar): 1.2×
+- Summer (Apr–May): 0.8× (off-season)
+
+**Demand Multipliers:**
+- 15+ recent bookings: 1.3×
+- 8–14 bookings: 1.15×
+- 3–7 bookings: 1.0×
+- Under 3 bookings: 0.95× (attract bookings)
+
+---
+
+## 🔒 Security Features
+
+- Bcrypt password hashing (12 rounds)
+- Account lockout after 5 failed login attempts (2 hour lock)
+- JWT access tokens (7d) + refresh tokens (30d)
+- Password change invalidates all old tokens
+- Helmet.js security headers
+- CORS with whitelist
+- Global + per-route rate limiting
+- Input validation on all endpoints
+- Activity audit logging to MongoDB
+
+---
+
+## 📊 Booking Workflow
+
+```
+Farmer submits → [PENDING]
+                     ↓
+Owner reviews → [CONFIRMED] or [REJECTED]
+                     ↓
+Machine delivered → [ACTIVE]
+                     ↓
+Work completed → [COMPLETED]
+                     ↓
+Both parties submit reviews
+```
+
+Auto-lifecycle (cron jobs):
+- Auto-activate confirmed bookings when start date arrives
+- Auto-complete active bookings when end date passes
+- Auto-cancel pending bookings with no response after 48h
+
+---
+
+## 🧪 Test Credentials (after seeding)
+
+| Role   | Email                      | Password   |
+|--------|----------------------------|------------|
+| Admin  | admin@farmrental.com       | Test@1234  |
+| Owner  | owner@farmrental.com       | Test@1234  |
+| Farmer | farmer@farmrental.com      | Test@1234  |

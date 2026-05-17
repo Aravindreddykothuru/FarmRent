@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; Start-Process -FilePath \"node\" -ArgumentList \"server.js\" -WorkingDirectory \"c:\\\\Users\\\\aravind reddy\\\\OneDrive\\\\Desktop\\\\farmers\\\\nextfrontend\" -WindowStyle Normal; Start-Sleep -Seconds 8; netstat -ano | findstr \"LISTENING\" | findstr \":3000\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; Start-Process -FilePath \"node\" -ArgumentList \"server.js\" -WorkingDirectory \"c:\\\\Users\\\\aravind reddy\\\\OneDrive\\\\Desktop\\\\farmers\\\\nextfrontend\" -WindowStyle Normal; Start-Sleep -Seconds 12; Invoke-RestMethod -Uri \"http://localhost:3000/api/v1/auth/reg-send-otp\" -Method Post -ContentType \"application/json\" -Body '{\"phone\":\"9876543210\",\"email\":\"895kkr@gmail.com\"}' | ConvertTo-Json)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:3000/api/v1/auth/reg-send-otp\" -Method Post -ContentType \"application/json\" -Body '{\"phone\":\"9876543210\",\"email\":\"895kkr@gmail.com\"}')",
+      "PowerShell(curl.exe -s -X POST http://localhost:3000/api/v1/auth/reg-send-otp -H \"Content-Type: application/json\" -d \"{\\\\\"phone\\\\\":\\\\\"9876543210\\\\\",\\\\\"email\\\\\":\\\\\"895kkr@gmail.com\\\\\"}\")",
+      "PowerShell(curl.exe -s -X POST http://localhost:3000/api/v1/auth/reg-send-otp -H \"Content-Type: application/json\" -d $body)",
+      "PowerShell($body = '{\"phone\":\"9876543210\",\"email\":\"895kkr@gmail.com\"}')",
+      "PowerShell('{\"phone\":\"9876543210\",\"email\":\"895kkr@gmail.com\"}' | Out-File -FilePath \"$env:TEMP\\\\otp_body.json\" -Encoding utf8 -NoNewline; curl.exe -s -X POST http://localhost:3000/api/v1/auth/reg-send-otp -H \"Content-Type: application/json\" -d \"@$env:TEMP\\\\otp_body.json\")",
+      "PowerShell(Get-Process -Name \"node\" -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2; $outFile = \"$env:TEMP\\\\srv_debug.txt\"; Start-Process -FilePath \"node\" -ArgumentList \"server.js\" -WorkingDirectory \"c:\\\\Users\\\\aravind reddy\\\\OneDrive\\\\Desktop\\\\farmers\\\\nextfrontend\" -RedirectStandardOutput $outFile -RedirectStandardError \"$env:TEMP\\\\srv_debug_err.txt\"; Start-Sleep -Seconds 14; '{\"phone\":\"9876543210\",\"email\":\"895kkr@gmail.com\"}' | Out-File \"$env:TEMP\\\\b.json\" -Encoding utf8 -NoNewline; curl.exe -s -X POST http://localhost:3000/api/v1/auth/reg-send-otp -H \"Content-Type: application/json\" -d \"@$env:TEMP\\\\b.json\"; Start-Sleep -Seconds 2; Get-Content $outFile | Select-String \"DEBUG|otp|email\" | Select-Object -Last 20)",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue)",
+      "PowerShell(Start-Sleep -Seconds 4; try { $r = Invoke-WebRequest -Uri \"http://localhost:3000/api/v1/auth\" -UseBasicParsing -TimeoutSec 5; \"Status: $\\($r.StatusCode\\) — $\\($r.Content.Substring\\(0,[Math]::Min\\(80,$r.Content.Length\\)\\)\\)\" } catch { \"Not ready yet: $_\" })",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2; Start-Process -FilePath \"node\" -ArgumentList \"server.js\" -WorkingDirectory \"c:\\\\Users\\\\aravind reddy\\\\OneDrive\\\\Desktop\\\\farmers\\\\nextfrontend\" -WindowStyle Hidden; Start-Sleep -Seconds 5; try { $r = Invoke-WebRequest -Uri \"http://localhost:3000/api/v1/auth\" -UseBasicParsing -TimeoutSec 5; \"OK: $\\($r.Content\\)\" } catch { \"Not ready: $_\" })",
+      "Read(//c/Users/aravind reddy/OneDrive/Desktop/**)",
+      "PowerShell(Get-Process -Id 35512 2>&1)",
+      "PowerShell(netstat -ano | findstr LISTENING | findstr \":3\" | Where-Object { $_ -match \":30[0-9][0-9] \" })",
+      "PowerShell(Get-Process -Id 3144 2>&1)",
+      "PowerShell(Get-Process -Id 3144)",
+      "PowerShell(Stop-Process -Id 19588 -Force -ErrorAction SilentlyContinue)"
+    ],
+    "defaultMode": "bypassPermissions"
+  }
+}

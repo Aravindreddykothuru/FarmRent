@@ -1,0 +1,23 @@
+# Environment variables — never commit
+.env
+.env.local
+.env.production
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Build / runtime artifacts
+dist/
+uploads/
+*.pid
+
+# OS
+.DS_Store
+Thumbs.db

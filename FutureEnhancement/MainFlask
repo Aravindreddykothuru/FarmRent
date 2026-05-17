@@ -1,0 +1,133 @@
+# app.py
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required
+from datetime import datetime, timedelta
+import os
+
+from payment_gateway import PaymentGateway
+from gps_tracking import GPSTracker
+from insurance_module import InsuranceModule
+from ml_analytics import PredictiveAnalytics
+
+app = Flask(__name__)
+
+# Configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'change-this-in-production')
+
+# Initialize extensions
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+
+# Initialize modules
+payment_gateway = PaymentGateway()
+gps_tracker = GPSTracker()
+insurance_module = InsuranceModule()
+ml_analytics = PredictiveAnalytics()
+
+# ==================== ROUTES ====================
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'version': '1.0.0'
+    }), 200
+
+# PAYMENT ROUTES
+@app.route('/api/payments/create', methods=['POST'])
+def create_payment():
+    data = request.get_json()
+    result = payment_gateway.process_payment(
+        data['user_id'],
+        data['amount'],
+        data.get('currency', 'usd')
+    )
+    return jsonify(result), (200 if result['success'] else 400)
+
+@app.route('/api/payments/refund', methods=['POST'])
+def refund_payment():
+    data = request.get_json()
+    result = payment_gateway.process_refund(data['transaction_id'])
+    return jsonify(result), (200 if result['success'] else 400)
+
+# GPS ROUTES
+@app.route('/api/gps/log', methods=['POST'])
+def log_location():
+    data = request.get_json()
+    result = gps_tracker.track_location(
+        data['user_id'],
+        data['latitude'],
+        data['longitude'],
+        data.get('altitude'),
+        data.get('speed')
+    )
+    return jsonify(result), 201
+
+@app.route('/api/gps/current/<int:user_id>', methods=['GET'])
+def get_current_location(user_id):
+    location = gps_tracker.get_current_location(user_id)
+    return jsonify(location), (200 if location else 404)
+
+@app.route('/api/gps/route/<int:user_id>', methods=['GET'])
+def get_user_route(user_id):
+    route = gps_tracker.get_route(user_id)
+    return jsonify({'route': route}), 200
+
+# INSURANCE ROUTES
+@app.route('/api/insurance/policy/create', methods=['POST'])
+def create_policy():
+    data = request.get_json()
+    policy = insurance_module.create_policy(
+        data['user_id'],
+        data['policy_type'],
+        data['coverage_amount'],
+        data['premium_amount'],
+        data['start_date'],
+        data['end_date']
+    )
+    return jsonify(policy), 201
+
+@app.route('/api/insurance/claim/create', methods=['POST'])
+def create_claim():
+    data = request.get_json()
+    claim = insurance_module.create_claim(
+        data['policy_number'],
+        data['description'],
+        data['amount_claimed']
+    )
+    return jsonify(claim), 201
+
+# ANALYTICS ROUTES
+@app.route('/api/analytics/risk/<int:user_id>', methods=['GET'])
+def get_risk_assessment(user_id):
+    result = ml_analytics.predict_risk_score(user_id)
+    return jsonify(result), 200
+
+@app.route('/api/analytics/churn/<int:user_id>', methods=['GET'])
+def get_churn_prediction(user_id):
+    result = ml_analytics.predict_churn(user_id)
+    return jsonify(result), 200
+
+@app.route('/api/analytics/fraud', methods=['POST'])
+def detect_fraud():
+    data = request.get_json()
+    result = ml_analytics.detect_fraud(data.get('transaction_data', {}))
+    return jsonify(result), 200
+
+@app.route('/api/analytics/claim/<int:policy_id>', methods=['GET'])
+def get_claim_likelihood(policy_id):
+    result = ml_analytics.predict_claim_likelihood(policy_id)
+    return jsonify(result), 200
+
+@app.route('/api/analytics/ltv/<int:user_id>', methods=['GET'])
+def get_ltv(user_id):
+    result = ml_analytics.predict_customer_ltv(user_id)
+    return jsonify(result), 200
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True, host='0.0.0.0', port=5000)

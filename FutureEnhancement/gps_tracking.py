@@ -1,0 +1,93 @@
+# gps_tracking.py
+import math
+from datetime import datetime
+from typing import List, Dict, Any
+
+class GPSTracker:
+    def __init__(self):
+        self.locations_cache = {}
+    
+    def track_location(self, user_id: int, latitude: float, 
+                      longitude: float, altitude: float = None,
+                      speed: float = None) -> Dict:
+        if user_id not in self.locations_cache:
+            self.locations_cache[user_id] = []
+        
+        location = {
+            'latitude': latitude,
+            'longitude': longitude,
+            'altitude': altitude,
+            'speed': speed,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        self.locations_cache[user_id].append(location)
+        return {'success': True, 'location_id': len(self.locations_cache[user_id])}
+    
+    def get_current_location(self, user_id: int) -> Dict:
+        if user_id in self.locations_cache and self.locations_cache[user_id]:
+            return self.locations_cache[user_id][-1]
+        return None
+    
+    def get_route(self, user_id: int) -> List[Dict]:
+        return self.locations_cache.get(user_id, [])
+    
+    def calculate_distance(self, logs: List[Dict]) -> float:
+        """Calculate total distance using Haversine formula"""
+        if len(logs) < 2:
+            return 0.0
+        
+        total_distance = 0.0
+        for i in range(len(logs) - 1):
+            lat1 = logs[i]['latitude']
+            lon1 = logs[i]['longitude']
+            lat2 = logs[i+1]['latitude']
+            lon2 = logs[i+1]['longitude']
+            total_distance += self._haversine_distance(lat1, lon1, lat2, lon2)
+        
+        return round(total_distance, 2)
+    
+    def _haversine_distance(self, lat1: float, lon1: float, 
+                           lat2: float, lon2: float) -> float:
+        """Calculate distance between two points using Haversine formula"""
+        R = 6371  # Earth radius in km
+        
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+        
+        a = math.sin(delta_phi/2)**2 + \
+            math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        
+        return R * c
+    
+    def calculate_average_speed(self, logs: List[Dict]) -> float:
+        """Calculate average speed across journey"""
+        if len(logs) < 2:
+            return 0.0
+        
+        distance = self.calculate_distance(logs)
+        first_time = datetime.fromisoformat(logs[0]['timestamp'])
+        last_time = datetime.fromisoformat(logs[-1]['timestamp'])
+        time_hours = (last_time - first_time).total_seconds() / 3600
+        
+        return round(distance / time_hours, 2) if time_hours > 0 else 0.0
+    
+    def get_geofence_status(self, user_id: int, center_lat: float, 
+                           center_lon: float, radius_km: float) -> Dict:
+        """Check if user is within geofence"""
+        location = self.get_current_location(user_id)
+        if not location:
+            return {'inside_geofence': False}
+        
+        distance = self._haversine_distance(
+            center_lat, center_lon,
+            location['latitude'], location['longitude']
+        )
+        
+        return {
+            'inside_geofence': distance <= radius_km,
+            'distance_km': round(distance, 2),
+            'radius_km': radius_km
+        }
