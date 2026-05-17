@@ -133,7 +133,7 @@ async function issueRefreshToken(userId, res) {
     res.cookie('rfsh', raw, {
         httpOnly: true,
         secure:   process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        sameSite: 'lax',
         maxAge:   REFRESH_TOKEN_EXPIRY_SEC * 1000,
         path:     '/api/v1/auth/refresh',
     });
