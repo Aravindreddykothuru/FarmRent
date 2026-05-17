@@ -46,7 +46,5 @@ jobs:
     needs: [backend-lint, frontend-lint]
     steps:
       - uses: actions/checkout@v4
-      - name: Build backend image
-        run: docker build -t farmrent-backend ./Backend
-      - name: Build frontend image
-        run: docker build -t farmrent-frontend ./nextfrontend
+      - name: Build unified production image
+        run: docker build -t farmrent . --file Dockerfile
