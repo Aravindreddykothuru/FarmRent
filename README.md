@@ -1,266 +1,360 @@
-# 🌾 FarmRent — AI-Powered Farm Equipment Rental Platform
+# FarmRent — Farm Equipment Rental Platform
 
-A next-generation farm machine rental platform featuring **Large Language Model (LLM) integration** for intelligent farming assistance. Four specialized layers work together to provide AI-enhanced equipment rental services.
-
-| Layer | Tech | Port | Key Features |
-|---|---|---|---|
-| **Frontend** (`nextfrontend`) | Next.js + React + Tailwind | 3000 | Modern UI with AI chat integration |
-| **Backend API** | Node.js + Express | 5000 | RESTful APIs with equipment management |
-| **AI Enhancement Service** | Python + Flask + LLM | 5001 | **🤖 AI-powered farming intelligence** |
-| **Cache** | Redis | 6379 | High-performance data caching |
+A full-stack platform that connects farmers with equipment owners for renting tractors, harvesters, and other farm machinery. Built with Next.js 16, Express, Supabase, Razorpay, and Socket.IO.
 
 ---
 
-## 🧠 AI-Powered Architecture
+## Architecture
 
 ```
-Browser
-  └── Next.js Frontend (port 3000)
-        ├── AI Chat Interface 🤖
-        └── /api/* proxy
-              └── Node.js Backend (port 5000)
-                    ├── /api/v1/*  ← machines, bookings, auth (Node)
-                    └── /api/v2/*  ← proxy → Flask AI Service (port 5001)
-                                        ├── /api/llm/* 🤖 **NEW AI ENDPOINTS**
-                                        │   ├── /equipment/recommend
-                                        │   ├── /farming/analyze
-                                        │   ├── /chat
-                                        │   └── /insights/generate
-                                        ├── /api/gps/*
-                                        ├── /api/insurance/*
-                                        ├── /api/payments/*
-                                        └── /api/analytics/*
+Browser / Mobile
+      │
+      ▼
+┌─────────────────────────────────────────────────────────┐
+│           Unified Server  (nextfrontend/server.js)       │
+│                 One process · One port (3000)            │
+│                                                          │
+│  /api/*  ─────────────────────► Express Backend         │
+│  /socket.io/*  ────────────────► Socket.IO              │
+│  /uploads/*  ──────────────────► Static files           │
+│  /* (everything else) ─────────► Next.js App Router     │
+└──────────┬──────────────────────────────────┬───────────┘
+           │                                  │
+           ▼                                  ▼
+    ┌─────────────┐                  ┌──────────────────┐
+    │  Supabase   │                  │  Redis (optional)│
+    │ (PostgreSQL)│                  │  Driver geo-     │
+    │  Database   │                  │  search + rate   │
+    │  Realtime   │                  │  limiting        │
+    └─────────────┘                  └──────────────────┘
+           │
+    ┌──────┴──────────────────────────────────────────────┐
+    │  External Services                                   │
+    │  • Razorpay   — UPI / card payments + webhooks      │
+    │  • Resend / Brevo / Gmail — transactional email     │
+    │  • MSG91 / Twilio — SMS OTP                         │
+    └─────────────────────────────────────────────────────┘
 ```
 
-### 🤖 LLM Integration Features
+### Key Design Decision — Unified Server
 
-**Instead of traditional APIs, farmers now interact with intelligent AI services:**
+`nextfrontend/server.js` starts a single Node.js process that serves both Next.js pages and the Express REST API on the same port. There is **no separate backend process** in production.
 
-- **🗣️ Natural Language Equipment Recommendations**: "I need to plow 50 acres of clay soil"
-- **💬 Conversational Farming Support**: AI chat assistant for farming questions
-- **📊 Smart Analytics**: LLM-enhanced risk assessment and farming insights
-- **📅 Intelligent Planning**: AI-generated farming operation plans
-- **⚖️ Equipment Comparison**: Side-by-side analysis of rental options
-- **🎯 Personalized Advice**: Context-aware farming recommendations
+```
+Request comes in
+  if /api/* or /socket.io/* or /health → Express handles it
+  else                                 → Next.js handles it
+```
+
+This means:
+- One Railway service, one port, one deploy
+- Next.js API routes (`/app/api/...`) and Express routes (`/api/v1/...`, `/api/payment/...`) coexist
+- `Backend/.env` is the single source of truth for all environment variables
 
 ---
 
-## Quick Start (Development)
+## Tech Stack
 
-### 1. Start Redis
-```bash
-# Docker (easiest)
-docker run -d -p 6379:6379 redis:7-alpine
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js 16 (App Router), React 19, Tailwind CSS, shadcn/ui |
+| Backend | Node.js 20, Express 4 |
+| Database | Supabase (PostgreSQL + Realtime) |
+| Auth | Custom JWT (access 15min + refresh 7d), email OTP |
+| Payments | Razorpay — UPI, cards, netbanking, wallets + COD fallback |
+| Real-time | Socket.IO (notifications + GPS tracking) |
+| Cache | Redis (driver geosearch, rate limiting, OTP) |
+| Email | Multi-provider: Resend → Brevo → Gmail SMTP → Ethereal |
+| GPS | Supabase Realtime + Socket.IO + OSRM routing |
+| Deploy | Railway (Docker), GitHub Actions CI |
 
-# Or install locally: https://redis.io/docs/install/
+---
+
+## Project Structure
+
 ```
-
-### 2. Configure AI Services
-```bash
-cd FutureEnhancement
-# Copy environment template
-cp .env.example .env
-
-# Add your LLM API keys (choose one or both)
-# OPENAI_API_KEY=sk-your-openai-key
-# ANTHROPIC_API_KEY=sk-ant-your-anthropic-key
-```
-
-### 3. Start Flask AI Service
-```bash
-cd FutureEnhancement
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-pip install -r requirements.txt
-python app.py
-# Runs on http://localhost:5001 with 🤖 AI capabilities
+farmers/
+├── Dockerfile              ← Production Docker image (unified server)
+├── railway.toml            ← Railway deployment config
+├── docker-compose.yml      ← Local dev with Redis + app
+│
+├── Backend/                ← Express REST API
+│   ├── app.js              ← Express app factory
+│   ├── server.js           ← Standalone backend entry (dev only)
+│   ├── .env                ← All environment variables (gitignored)
+│   ├── .env.example        ← Template — copy to .env
+│   │
+│   ├── routes/             ← API route handlers
+│   │   ├── payment.js      ← Razorpay create-order, verify, webhook, refund
+│   │   ├── machines.js     ← Equipment CRUD + search
+│   │   ├── messages.js     ← Chat messages
+│   │   ├── reviews.js      ← Equipment reviews
+│   │   ├── notifications.js
+│   │   ├── offers.js       ← Price negotiation
+│   │   ├── disputes.js
+│   │   ├── kyc.js
+│   │   └── ...
+│   │
+│   ├── services/           ← Modular microservice-style handlers
+│   │   ├── auth-service/   ← Register, login, OTP, password reset
+│   │   ├── booking-service/← Create booking, driver assignment, routing
+│   │   ├── equipment-service/
+│   │   ├── tracking-service/ ← Socket.IO + Redis geo
+│   │   ├── user-service/   ← Profile, avatar upload
+│   │   ├── driver-service/ ← Driver registration and location
+│   │   └── routing-service/ ← OSRM route calculation
+│   │
+│   ├── lib/
+│   │   ├── supabase.js     ← Supabase client (service role)
+│   │   ├── emailService.js ← Multi-provider email
+│   │   ├── otpService.js   ← SMS + in-memory OTP
+│   │   ├── notificationService.js ← Push via Socket.IO
+│   │   └── refundService.js ← Razorpay refunds
+│   │
+│   └── supabase/
+│       ├── schema.sql      ← Full DB schema
+│       └── migrations/
+│           └── FIX_run_this_in_supabase.sql  ← Run once in Supabase SQL Editor
+│
+└── nextfrontend/           ← Next.js 16 App Router frontend
+    ├── server.js           ← UNIFIED SERVER ENTRY POINT (production + dev)
+    ├── next.config.ts
+    │
+    ├── app/                ← Next.js pages (App Router)
+    │   ├── page.tsx            ← Home / browse equipment
+    │   ├── browse/             ← Equipment search with filters
+    │   ├── equipment/[id]/     ← Equipment detail
+    │   ├── book/[machineId]/   ← Booking form + Razorpay / COD payment
+    │   ├── bookings/           ← My bookings list
+    │   ├── bookings/[id]/      ← Booking detail + tracking
+    │   ├── payment/success/    ← Payment confirmation (Razorpay + COD)
+    │   ├── dashboard/
+    │   │   ├── farmer/         ← Farmer dashboard
+    │   │   ├── owner/          ← Equipment owner dashboard
+    │   │   ├── driver/         ← Driver dashboard
+    │   │   └── admin/          ← Admin panel
+    │   ├── tracking/[bookingId]/ ← Live GPS map
+    │   ├── chats/              ← Messaging
+    │   ├── wallet/             ← Wallet & transactions
+    │   ├── login/ register/ forgot-password/ ← Auth
+    │   └── api/tracking/update/ ← GPS update endpoint (Next.js route)
+    │
+    ├── components/
+    │   ├── TrackingMap.tsx     ← Leaflet real-time map
+    │   ├── BookingChat.tsx     ← In-booking chat
+    │   ├── NotificationBell.tsx ← Real-time socket notifications
+    │   ├── DriverInfoCard.tsx  ← Assigned driver + ETA
+    │   └── ...
+    │
+    ├── hooks/
+    │   ├── useRazorpay.ts      ← Razorpay SDK integration
+    │   ├── useTrackingSocket.ts
+    │   └── useDriverGPS.ts
+    │
+    └── context/
+        ├── AuthContext.tsx     ← JWT auth state
+        └── LanguageContext.tsx ← i18n (10 Indian languages)
 ```
 
 ---
 
-## Quick Start (Development)
+## Database Schema (Supabase)
 
-### 1. Start Redis
-```bash
-# Docker (easiest)
-docker run -d -p 6379:6379 redis:7-alpine
-
-# Or install locally: https://redis.io/docs/install/
+```
+users              — accounts (custom auth, not Supabase Auth)
+equipment          — listings (owner, location, price, images)
+bookings           — rental records with driver assignment + GPS lifecycle
+payments           — Razorpay payment records + COD
+drivers            — driver profiles + real-time location
+equipment_tracking — GPS breadcrumb trail
+notifications      — in-app notifications (Socket.IO)
+messages / chats   — equipment + booking messaging
+reviews            — equipment ratings
+disputes           — booking dispute resolution
+kyc_documents      — Aadhaar / license verification
+promo_codes        — discount codes
+favorites          — user wishlists
+offers             — price negotiation between farmer and owner
+refresh_tokens     — JWT refresh token store
 ```
 
-### 2. Start Flask Service
-```bash
-cd FutureEnhancement
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-pip install -r requirements.txt
-copy .env.example .env        # then edit .env with your keys
-python app.py
-# Runs on http://localhost:5001
+**First-time Supabase setup:** Run `Backend/supabase/migrations/FIX_run_this_in_supabase.sql` in Supabase Dashboard → SQL Editor. It's idempotent (safe to re-run).
+
+---
+
+## Payment Flow
+
+```
+Farmer selects equipment
+       │
+       ├── Razorpay (UPI / card / netbanking / wallet)
+       │     1. POST /api/payment/create-order → Razorpay order
+       │     2. Razorpay checkout in browser
+       │     3. POST /api/payment/verify → HMAC verify → mark paid
+       │     4. Booking status → confirmed, payment_status → paid
+       │     5. Webhook (/api/payment/webhook) as backup confirmation
+       │
+       └── Cash on Delivery
+             1. Booking created with payment_method = 'cod'
+             2. Redirect to /payment/success?method=cod
+             3. Payment collected when equipment arrives
 ```
 
-### 3. Start Node Backend
+Razorpay test keys work for development. For real money use `rzp_live_*` keys.
+
+---
+
+## Real-time Features (Socket.IO)
+
+| Namespace | Events | Purpose |
+|---|---|---|
+| `/notifications` | `notification` | Booking updates, payment alerts |
+| `/tracking` | `location:update`, `driver:assigned` | Live equipment GPS |
+
+---
+
+## Quick Start (Local Development)
+
+### Prerequisites
+- Node.js 20+
+- A free [Supabase](https://supabase.com) project
+- Razorpay test account keys
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/Aravindreddykothuru/FarmRent.git
+cd FarmRent
+
+# Backend dependencies
+cd Backend && npm install
+
+# Frontend dependencies
+cd ../nextfrontend && npm install
+```
+
+### 2. Configure environment
+
 ```bash
 cd Backend
-npm install
-copy .env.example .env        # then edit .env
-node server.js                # or: npm run dev (requires nodemon)
-# Runs on http://localhost:5000
+cp .env.example .env
+# Edit .env — fill in SUPABASE_URL, SUPABASE_SERVICE_KEY, JWT_SECRET,
+#              RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
 ```
 
-### 4. Start Frontend (Next.js — unified with API on same port)
+### 3. Set up database
+
+Open Supabase Dashboard → SQL Editor → New Query, paste the contents of:
+```
+Backend/supabase/migrations/FIX_run_this_in_supabase.sql
+```
+Click **Run**.
+
+### 4. Start the app (single command)
+
 ```bash
 cd nextfrontend
-npm install
-copy .env.example .env.local   # then edit if needed
 npm run dev
-# App + API → http://localhost:3000  (see nextfrontend/server.js)
+# → http://localhost:3002  (both UI and API)
 ```
 
----
-
-## Docker Compose (all-in-one)
-
-> Requires Dockerfiles in each service folder (see below).
+### 5. Optional: Redis (for driver geo-tracking + rate limiting)
 
 ```bash
-# From the project root
-docker compose up --build
-```
-
-Services:
-- Frontend → http://localhost:3000
-- Backend  → http://localhost:5000
-- Flask    → http://localhost:5001
-- Redis    → localhost:6379
-
----
-
-## API Reference
-
-### Node Backend — `/api/v1`
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/auth/register` | Register user |
-| POST | `/api/v1/auth/login` | Login, returns JWT |
-| GET  | `/api/v1/machines` | Search/filter machines |
-| POST | `/api/v1/bookings` | Create booking |
-| GET  | `/api/v1/ml/recommendations` | ML machine recommendations |
-| GET  | `/api/v1/ml/demand-prediction` | Demand forecast |
-| POST | `/api/v1/ml/optimal-pricing` | Price recommendation |
-| GET  | `/api/v1/ml/churn-risk` | Farmer churn analysis |
-
-### Flask Micro-service — `/api/v2` (proxied through Node)
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v2/gps/log` | Log GPS location |
-| GET  | `/api/v2/gps/current/:userId` | Get current location |
-| GET  | `/api/v2/gps/route/:userId` | Get full route |
-| POST | `/api/v2/gps/geofence` | Check geofence status |
-| POST | `/api/v2/insurance/policy/create` | Create insurance policy |
-| POST | `/api/v2/insurance/claim/create` | File a claim |
-| POST | `/api/v2/payments/create` | Create Stripe payment intent |
-| POST | `/api/v2/payments/refund` | Refund transaction |
-| GET  | `/api/v2/analytics/risk/:userId` | ML risk score |
-| GET  | `/api/v2/analytics/churn/:userId` | Churn prediction |
-| POST | `/api/v2/analytics/fraud` | Fraud detection |
-| GET  | `/api/v2/analytics/ltv/:userId` | Customer LTV |
-
-### 🤖 AI/LLM Services — `/api/v2/llm` (NEW!)
-
-| Method | Path | Description | AI Feature |
-|---|---|---|---|
-| POST | `/api/v2/llm/equipment/recommend` | **Smart equipment recommendations** | 🤖 Natural language processing |
-| POST | `/api/v2/llm/farming/analyze` | **Farming query analysis** | 🧠 Intelligent advice |
-| POST | `/api/v2/llm/chat` | **Conversational support** | 💬 Chat with farming AI |
-| POST | `/api/v2/llm/booking/assist` | **Booking assistance** | 📅 Smart scheduling |
-| POST | `/api/v2/llm/risk/enhanced` | **Enhanced risk analysis** | ⚡ AI + ML combined |
-| POST | `/api/v2/llm/insights/generate` | **Personalized insights** | 📊 Farming intelligence |
-| POST | `/api/v2/llm/equipment/compare` | **Equipment comparison** | ⚖️ Side-by-side analysis |
-| POST | `/api/v2/llm/farming/plan` | **Farming operation plans** | 📋 AI planning |
-
-### Health checks
-```bash
-curl http://localhost:5000/health     # Node
-curl http://localhost:5001/api/health # Flask (shows LLM status)
-curl http://localhost:5000/api/v2/health # Flask via Node proxy
-```
-
----
-
-## 🤖 Using LLM Features
-
-### Equipment Recommendation Example
-```bash
-curl -X POST http://localhost:5001/api/llm/equipment/recommend \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "I need to harvest 20 acres of wheat",
-    "context": {
-      "farm_size": "small",
-      "crop": "wheat",
-      "terrain": "flat",
-      "experience": "beginner"
-    }
-  }'
-```
-
-### AI Chat Support
-```bash
-curl -X POST http://localhost:5001/api/llm/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "How do I maintain my tractor?",
-    "context": "equipment_maintenance"
-  }'
-```
-
-### Farming Plan Generation
-```bash
-curl -X POST http://localhost:5001/api/llm/farming/plan \
-  -H "Content-Type: application/json" \
-  -d '{
-    "farm_details": {
-      "size": "50 acres",
-      "soil_type": "loamy",
-      "location": "Midwest USA"
-    },
-    "season": "spring",
-    "goals": ["maximize yield", "minimize costs"]
-  }'
+docker run -d -p 6379:6379 redis:7-alpine
+# Set REDIS_URL=redis://127.0.0.1:6379 in Backend/.env
 ```
 
 ---
 
 ## Environment Variables
 
-### Backend (`Backend/.env`)
-See [`Backend/.env.example`](Backend/.env.example)
+All variables live in `Backend/.env`. See `Backend/.env.example` for the full list.
 
-### Flask (`FutureEnhancement/.env`)
-See [`FutureEnhancement/.env.example`](FutureEnhancement/.env.example)
-
-### Frontend (`nextfrontend/.env.local`)
-See [`nextfrontend/.env.example`](nextfrontend/.env.example)
+| Variable | Required | Description |
+|---|---|---|
+| `SUPABASE_URL` | Yes | Supabase project URL |
+| `SUPABASE_SERVICE_KEY` | Yes | Supabase service role key (secret) |
+| `JWT_SECRET` | Yes | Access token signing key |
+| `JWT_REFRESH_SECRET` | Yes | Refresh token signing key |
+| `RAZORPAY_KEY_ID` | Yes | `rzp_test_*` or `rzp_live_*` |
+| `RAZORPAY_KEY_SECRET` | Yes | Razorpay secret |
+| `RAZORPAY_WEBHOOK_SECRET` | Prod | Razorpay webhook verification |
+| `APP_URL` | Yes | Public URL (e.g. `https://your-app.up.railway.app`) |
+| `ALLOWED_ORIGINS` | Yes | CORS allowed origins (comma-separated) |
+| `RESEND_API_KEY` | Email | Resend API key (recommended) |
+| `BREVO_SMTP_USER` | Email | Brevo SMTP fallback |
+| `SMTP_HOST/USER/PASS` | Email | Gmail SMTP fallback |
+| `REDIS_URL` | Optional | Redis connection string |
+| `PORT` | Auto | Set by Railway automatically |
 
 ---
 
-## Frontend API Usage
+## Deployment (Railway)
 
-```typescript
-import { machines, bookings, gps, insurance, payments, mlNode } from '@/lib/api';
+1. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub repo
+2. Select `Aravindreddykothuru/FarmRent`
+3. Railway auto-detects `Dockerfile` and `railway.toml`
+4. Add a **Redis** addon: New → Database → Redis (Railway sets `REDIS_URL` automatically)
+5. Go to **Variables** tab, add all required env vars from the table above
+6. Set `APP_URL` and `CLIENT_URL` and `ALLOWED_ORIGINS` to your Railway public domain
+7. Click **Deploy**
 
-// Get machine recommendations
-const recs = await mlNode.getRecommendations({ cropType: 'rice', district: 'Guntur' });
+Build takes ~3-5 minutes (installs deps + Next.js build). Health check: `GET /health`
 
-// Log GPS location
-await gps.logLocation({ user_id: 1, latitude: 16.5, longitude: 80.6 });
+---
 
-// Create insurance policy
-await insurance.createPolicy({ user_id: 1, policy_type: 'premium', ... });
+## API Reference
 
-// Process payment
-const result = await payments.createPayment({ user_id: 1, amount: 1500 });
-```
+### Auth
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/auth/register` | Register + email OTP sent |
+| POST | `/api/v1/auth/verify-otp` | Verify OTP → get JWT |
+| POST | `/api/v1/auth/login` | Login with email + password |
+| POST | `/api/v1/auth/refresh` | Refresh access token |
+| POST | `/api/v1/auth/forgot-password` | Send reset email |
+
+### Equipment
+| Method | Path | Description |
+|---|---|---|
+| GET  | `/api/v1/machines` | List/search equipment |
+| POST | `/api/v1/machines` | Add listing (owner) |
+| GET  | `/api/v1/machines/:id` | Equipment detail |
+| PUT  | `/api/v1/machines/:id` | Update listing |
+
+### Bookings
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/bookings` | Create booking (auto-assigns driver) |
+| GET  | `/api/v1/bookings` | My bookings |
+| GET  | `/api/v1/bookings/:id` | Booking detail |
+| PATCH | `/api/v1/bookings/:id/status` | Update booking status |
+
+### Payments
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/payment/create-order` | Create Razorpay order |
+| POST | `/api/payment/verify` | Verify + confirm payment |
+| GET  | `/api/payment/status?orderId=` | Poll payment status |
+| POST | `/api/payment/refund` | Initiate refund |
+| POST | `/api/payment/webhook` | Razorpay webhook handler |
+
+### Tracking
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/tracking/update` | Emit GPS location (Socket.IO) |
+| GET  | `/api/v1/tracking/:bookingId` | Current position |
+| GET  | `/api/v1/tracking/:bookingId/history` | GPS breadcrumbs |
+
+---
+
+## Supported Languages
+
+English · Hindi · Telugu · Tamil · Kannada · Malayalam · Gujarati · Marathi · Punjabi · Bengali
+
+---
+
+## License
+
+MIT
