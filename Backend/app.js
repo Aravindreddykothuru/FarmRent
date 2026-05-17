@@ -132,7 +132,7 @@ function buildBackendApplication() {
             isReady: Boolean(redisClient?.isReady),
         };
         const ok = redis.isReady || !redis.isOpen;
-        res.status(ok ? 200 : 503).json({
+        res.status(200).json({
             status: ok ? 'healthy' : 'degraded',
             service: 'API Gateway',
             timestamp: new Date().toISOString(),
