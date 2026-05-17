@@ -2,7 +2,7 @@
 FROM node:20-alpine AS backend-deps
 WORKDIR /app/Backend
 COPY Backend/package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --legacy-peer-deps
 
 # ── Stage 2: install Frontend deps + build Next.js ───────────────────────────
 FROM node:20-alpine AS frontend-builder
@@ -14,11 +14,11 @@ COPY --from=backend-deps /app/Backend/node_modules ./Backend/node_modules
 
 # Install ALL frontend deps (TypeScript, postcss etc. needed for build)
 COPY nextfrontend/package*.json ./nextfrontend/
-RUN cd nextfrontend && npm ci
+RUN cd nextfrontend && npm ci --legacy-peer-deps
 
 # Copy frontend source and build
 COPY nextfrontend/ ./nextfrontend/
-RUN cd nextfrontend && npm run build
+RUN cd nextfrontend && NODE_OPTIONS="--max-old-space-size=1536" npm run build
 
 # ── Stage 3: production runner ────────────────────────────────────────────────
 FROM node:20-alpine AS runner
