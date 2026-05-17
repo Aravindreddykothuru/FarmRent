@@ -62,7 +62,4 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_SERVICE_ID: 1ff35be7-e2b9-425a-b20d-113e481fdcc3
-          RAILWAY_ENVIRONMENT_ID: c68ae821-42bf-42b7-8cbe-5088e53d7d4d
-        run: |
-          cd nextfrontend
-          RAILWAY_TOKEN=$RAILWAY_TOKEN railway up --service $RAILWAY_SERVICE_ID --environment production --detach
+        run: railway up --service $RAILWAY_SERVICE_ID --detach
