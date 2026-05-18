@@ -23,7 +23,7 @@ function getRazorpay() {
         throw new Error('RAZORPAY_KEY_ID must start with rzp_live_ or rzp_test_');
     }
     if (process.env.NODE_ENV === 'production' && !isLive) {
-        throw new Error('Production requires a live Razorpay key (rzp_live_)');
+        logger.warn('[payment] Using Razorpay TEST key in production — switch to rzp_live_ before going live');
     }
     return new Razorpay({ key_id: keyId, key_secret: keySecret });
 }

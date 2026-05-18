@@ -56,7 +56,7 @@ async function refreshAccessToken(): Promise<string | null> {
 function clearSession() {
     if (typeof window === 'undefined') return;
     localStorage.removeItem('authToken');
-    document.cookie = 'authRole=; path=/; SameSite=Strict; max-age=0';
+    document.cookie = 'authRole=; path=/; SameSite=Lax; max-age=0';
     window.location.href = '/login?reason=session_expired';
 }
 
