@@ -65,7 +65,7 @@ router.post('/driver-location', auth(true), asyncHandler(async (req, res) => {
         await supabase.from('drivers').update({
             current_lat: smoothed.lat, current_lng: smoothed.lng,
             heading: Number(heading), speed: Number(speed),
-        }).eq('id', driverId).catch(() => {});
+        }).eq('id', driverId).then(null, () => {});
     }
 
     // Update Redis GEO + cache

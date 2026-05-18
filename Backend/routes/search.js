@@ -193,7 +193,7 @@ router.get('/machines', async (req, res) => {
                     p_lng:       farmerLng,
                     p_radius_km: radiusKm,
                 })
-                .catch(() => ({ data: null }));
+                .then(r => r, () => ({ data: null }));
 
             if (Array.isArray(rpcData)) {
                 // Filter by type/query/price on top of geo results
@@ -331,7 +331,7 @@ router.get('/nearby', async (req, res) => {
             p_lng:       longitude,
             p_radius_km: parseFloat(radius) || 50,
         })
-        .catch(() => ({ data: [] }));
+        .then(r => r, () => ({ data: [] }));
 
     let machines = (data || []).map(r => toMachine(r, latitude, longitude));
     if (type) machines = machines.filter(m => m.type.includes(type.replace(/-/g, ' ')));

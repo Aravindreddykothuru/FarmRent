@@ -136,7 +136,7 @@ router.get('/nearby', async (req, res) => {
     // DB Haversine fallback
     const { data } = await supabase.rpc('find_nearby_equipment', {
         p_lat: latitude, p_lng: longitude, p_radius_km: parseFloat(radius) || 50,
-    }).catch(() => ({ data: [] }));
+    }).then(r => r, () => ({ data: [] }));
     let machines = (data || []).map(r => toMachine(r));
     if (type) machines = machines.filter(m => m.type.includes(type.replace(/-/g, ' ')));
     return res.json({ data: machines, source: 'db' });

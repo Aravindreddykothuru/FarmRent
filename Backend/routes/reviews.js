@@ -89,7 +89,7 @@ router.delete('/:id', auth(true), asyncHandler(async (req, res) => {
     }
 
     await supabase.from('reviews').delete().eq('id', req.params.id);
-    await supabase.rpc('compute_equipment_avg_rating', { p_equipment_id: review.equipment_id }).catch(() => {});
+    await supabase.rpc('compute_equipment_avg_rating', { p_equipment_id: review.equipment_id }).then(null, () => {});
 
     return res.json({ success: true });
 }));
