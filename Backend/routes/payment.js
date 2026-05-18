@@ -57,14 +57,16 @@ router.post('/create-order', async (req, res) => {
         const userId    = req.user?.id || req.user?.sub || null;
         const bookingId = notes?.bookingId || receipt || null;
         if (supabase) {
-            await supabase.from('payments').insert({
-                user_id:           userId,          // nullable — no FK violation
-                razorpay_order_id: order.id,
-                amount_paise:      order.amount,
-                currency:          order.currency,
-                status:            'pending',
-                booking_id:        bookingId || null,
-            }).catch(() => {});
+            try {
+                await supabase.from('payments').insert({
+                    user_id:           userId,
+                    razorpay_order_id: order.id,
+                    amount_paise:      order.amount,
+                    currency:          order.currency,
+                    status:            'pending',
+                    booking_id:        bookingId || null,
+                });
+            } catch { /* non-fatal — order was created in Razorpay */ }
         }
 
         return res.json({

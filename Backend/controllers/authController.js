@@ -502,9 +502,9 @@ exports.sendPhoneOTP = async (req, res, next) => {
         const { otp, hash, expiry } = await createOTP();
         await redisSet(`otp:${uid}`, { hash, expiry, attempts: 0 }, 10 * 60);
 
-        // Also update phone number in DB if provided
+        // Also update phone number in DB if provided (fire-and-forget)
         if (phone) {
-            supabase.from('users').update({ phone }).eq('id', uid).catch(() => {});
+            supabase.from('users').update({ phone }).eq('id', uid).then(null, () => {});
         }
 
         const provider = await sendOTP(phone, otp);
