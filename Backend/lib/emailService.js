@@ -36,7 +36,9 @@ async function sendViaResend({ to, subject, html }) {
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) return false;
 
-    const from = process.env.EMAIL_FROM || 'FarmRent <onboarding@resend.dev>';
+    // Use RESEND_FROM if set; otherwise fall back to sandbox address
+    // (Gmail/custom domains are not valid Resend from addresses without domain verification)
+    const from = process.env.RESEND_FROM || 'FarmRent <onboarding@resend.dev>';
 
     try {
         const res = await fetch('https://api.resend.com/emails', {
@@ -181,10 +183,10 @@ async function send({ to, subject, html }) {
 
     // 1. Gmail / custom SMTP — most reliable, works for any recipient
     if (await sendViaSmtp({ to, subject, html })) return;
-    // 2. Resend — works when domain is verified or sending to account owner email
-    if (await sendViaResend({ to, subject, html })) return;
-    // 3. Brevo SMTP — free 300/day
+    // 2. Brevo SMTP — free 300/day, no domain verification needed
     if (await sendViaBrevo({ to, subject, html })) return;
+    // 3. Resend — works when domain is verified or sending to account owner email
+    if (await sendViaResend({ to, subject, html })) return;
     // 4. Dev preview — Ethereal catches the email; preview URL printed to console
     await sendViaEthereal({ to, subject, html });
 }

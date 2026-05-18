@@ -41,11 +41,11 @@ const AUTH_ROLE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days — matches refresh token 
 
 function writeAuthRoleCookie(role: string) {
     const secure = window.location.protocol === 'https:' ? '; Secure' : '';
-    document.cookie = `authRole=${role}; path=/; SameSite=Strict; max-age=${AUTH_ROLE_MAX_AGE}${secure}`;
+    document.cookie = `authRole=${role}; path=/; SameSite=Lax; max-age=${AUTH_ROLE_MAX_AGE}${secure}`;
 }
 
 function clearAuthRoleCookie() {
-    document.cookie = 'authRole=; path=/; SameSite=Strict; max-age=0';
+    document.cookie = 'authRole=; path=/; SameSite=Lax; max-age=0';
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);

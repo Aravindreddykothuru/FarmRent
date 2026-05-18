@@ -61,5 +61,5 @@ jobs:
       - name: Deploy
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_SERVICE_ID: 1ff35be7-e2b9-425a-b20d-113e481fdcc3
+          RAILWAY_SERVICE_ID: ba632ca4-3287-401e-92ac-1c095c81b07b
         run: railway up --service $RAILWAY_SERVICE_ID --detach
