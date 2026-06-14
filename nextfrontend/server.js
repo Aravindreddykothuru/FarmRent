@@ -7,7 +7,7 @@ const http = require('http');
 const { parse } = require('url');
 
 const FRONTEND_DIR = __dirname;
-const BACKEND_ROOT = path.join(FRONTEND_DIR, '..', 'Backend');
+const BACKEND_ROOT = path.join(FRONTEND_DIR, '..', 'Backend_Node_legacy');
 
 // Remove stale Next.js dev lock so restarts never get stuck
 try {
