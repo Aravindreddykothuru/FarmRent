@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, X, Plus, MapPin } from 'lucide-react';
 import { nodeApi } from '@/lib/api';
-import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import ImageUploader from '@/components/ImageUploader';
 import { useLanguage } from '@/context/LanguageContext';
@@ -96,7 +95,7 @@ export default function AddEquipmentPage() {
 
         setSubmitting(true);
         try {
-            const res = await nodeApi.post<{ data?: { id?: string }; id?: string }>('/machines', {
+            await nodeApi.post('/machines', {
                 name: form.name,
                 type: form.type,
                 description: form.description,
@@ -125,21 +124,6 @@ export default function AddEquipmentPage() {
                 features:       form.features.split(',').map(f => f.trim()).filter(Boolean),
                 specifications: specs,
             });
-
-            // Also write pickup location directly to Supabase in case the backend
-            // does not propagate the new columns yet.
-            const equipmentId = res?.data?.id ?? (res as unknown as { id?: string })?.id;
-            if (equipmentId && supabase) {
-                await supabase
-                    .from('equipment')
-                    .update({
-                        pickup_lat:      pickupLocation.lat,
-                        pickup_lng:      pickupLocation.lng,
-                        pickup_address:  pickupLocation.address,
-                        pickup_landmark: pickupLocation.landmark,
-                    } as Record<string, unknown>)
-                    .eq('id', equipmentId);
-            }
 
             toast.success('Equipment listed successfully!');
             router.push('/dashboard/owner');

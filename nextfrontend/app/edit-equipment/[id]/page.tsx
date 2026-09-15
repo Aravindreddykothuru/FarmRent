@@ -93,7 +93,7 @@ export default function EditEquipmentPage() {
             })
             .catch(() => toast.error(t('editEquipment.couldNotLoad')))
             .finally(() => setLoading(false));
-    }, [id]);
+    }, [id, t]);
 
     const addSpec = () => {
         if (!form.specKey.trim()) return;

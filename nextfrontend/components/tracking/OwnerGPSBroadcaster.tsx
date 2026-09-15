@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { io, Socket } from 'socket.io-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,7 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
   const watchIdRef      = useRef<number | null>(null);
   const lastSentRef     = useRef<{ lat: number; lng: number; time: number } | null>(null);
   const tickerRef       = useRef<ReturnType<typeof setInterval> | null>(null);
+  const socketRef       = useRef<Socket | null>(null);
 
   // ── Ticker for "X seconds ago" display ────────────────────────────────────
   useEffect(() => {
@@ -95,13 +97,26 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
     return () => { if (tickerRef.current) clearInterval(tickerRef.current); };
   }, []);
 
-  // ── Insert one location point to Supabase ─────────────────────────────────
+  // ── Insert one location point to Supabase / Socket.IO ────────────────────
   const sendLocationPoint = useCallback(async (
     lat: number, lng: number,
     accuracy: number | null, speedKmh: number | null,
     heading: number | null, altitude: number | null,
     battery: number | null,
   ) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit("equipment:location_update", {
+        equipmentId,
+        bookingId,
+        latitude: lat,
+        longitude: lng,
+        accuracy,
+        speed: speedKmh,
+        heading,
+      });
+      return true;
+    }
+
     if (!supabase) return false;
     const { error: dbError } = await supabase.from('equipment_locations').insert({
       equipment_id:  equipmentId,
@@ -115,7 +130,7 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
       battery_level: battery,
       source:        'mobile_gps',
     } as Record<string, unknown>);
-
+ 
     if (dbError) {
       console.error('GPS insert error:', dbError.message);
       setError(`DB error: ${dbError.message}`);
@@ -177,10 +192,6 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
       setError('GPS is not supported on this device or browser.');
       return;
     }
-    if (!supabase) {
-      setError('Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
-      return;
-    }
     setError(null);
     setStats(prev => ({
       ...prev,
@@ -190,6 +201,15 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
       distanceTraveled: 0,
     }));
     lastSentRef.current = null;
+ 
+    // Connect to Socket.IO
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+    const socketOrigin = backendUrl || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
+    socketRef.current = io(`${socketOrigin}/tracking`, {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       handlePosition,
@@ -204,6 +224,10 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
     lastSentRef.current = null;
     setIsActive(false);
   }, []);
@@ -211,6 +235,7 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
   // ── Cleanup on unmount ────────────────────────────────────────────────────
   useEffect(() => () => {
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+    if (socketRef.current) socketRef.current.disconnect();
   }, []);
 
   // ── Derived display values ────────────────────────────────────────────────

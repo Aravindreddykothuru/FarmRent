@@ -21,6 +21,8 @@ const TYPE_ICONS: Record<string, string> = {
     system:            '🔔',
 };
 
+import { useClickOutside } from '@/hooks/useClickOutside';
+
 export default function NotificationBell() {
     const { t } = useLanguage();
     const [open, setOpen]             = useState(false);
@@ -28,6 +30,12 @@ export default function NotificationBell() {
     const [unreadCount, setUnreadCount] = useState(0);
     const [loading, setLoading]       = useState(false);
     const panelRef = useRef<HTMLDivElement>(null);
+
+    useClickOutside({
+        refs: [panelRef],
+        handler: () => setOpen(false),
+        enabled: open,
+    });
 
     const fetchNotifs = useCallback(async () => {
         setLoading(true);
@@ -54,15 +62,6 @@ export default function NotificationBell() {
         socket.on('notification:new', handler);
         return () => { socket.off('notification:new', handler); };
     }, [fetchNotifs]);
-
-    // Close panel when clicking outside
-    useEffect(() => {
-        const handler = (e: MouseEvent) => {
-            if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpen(false);
-        };
-        if (open) document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [open]);
 
     const markRead = async (id: string) => {
         try {

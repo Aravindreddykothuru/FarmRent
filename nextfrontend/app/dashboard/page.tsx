@@ -109,7 +109,7 @@ export default function DashboardPage() {
             .then(r => setBookings(r?.bookings ?? r?.data?.bookings ?? []))
             .catch(() => setError(t('dashboard.loadError')))
             .finally(() => setLoading(false));
-    }, []);
+    }, [t]);
 
     const activeList    = bookings.filter(b => isActive(b) || isUpcoming(b));
     const historyList   = bookings.filter(b => !isActive(b) && !isUpcoming(b));

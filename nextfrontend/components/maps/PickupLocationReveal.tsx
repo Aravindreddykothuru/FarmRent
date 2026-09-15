@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic';
 import { memo, useRef, useEffect } from 'react';
 import { ExternalLink, Navigation, MapPin, Phone, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { MAP_COLORS } from '@/lib/mapColors';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ export interface PickupRevealProps {
 let _patched = false;
 function patchLeafletIcons() {
   if (_patched) return;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const L = require('leaflet');
   delete (L.Icon.Default.prototype as Record<string, unknown>)._getIconUrl;
   L.Icon.Default.mergeOptions({
@@ -46,7 +47,7 @@ function patchLeafletIcons() {
 // ── Size invalidate ───────────────────────────────────────────────────────────
 
 const SizeWatcher = memo(function SizeWatcher() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const { useMap } = require('react-leaflet');
   const map = useMap();
   useEffect(() => {
@@ -62,9 +63,9 @@ const SizeWatcher = memo(function SizeWatcher() {
 function MapInner({ lat, lng, equipmentName }: {
   lat: number; lng: number; equipmentName: string
 }) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const { MapContainer, TileLayer, Marker, Popup } = require('react-leaflet');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const L = require('leaflet');
   patchLeafletIcons();
 
@@ -74,11 +75,11 @@ function MapInner({ lat, lng, equipmentName }: {
         <div style="
           width:32px;height:32px;border-radius:50% 50% 50% 0;
           transform:rotate(-45deg);
-          background:linear-gradient(135deg,#3b82f6,#1d4ed8);
+          background:linear-gradient(135deg,${MAP_COLORS.PIN_BLUE_START},${MAP_COLORS.PIN_BLUE_END});
           border:3px solid white;
           box-shadow:0 4px 12px rgba(59,130,246,0.55);
         "></div>
-        <div style="width:2px;height:10px;background:#3b82f6;margin-top:-2px;"></div>
+        <div style="width:2px;height:10px;background:${MAP_COLORS.PIN_BLUE_START};margin-top:-2px;"></div>
       </div>`,
     iconSize:   [32, 46],
     iconAnchor: [16, 46],

@@ -18,7 +18,7 @@ const loginSchema = z.object({
     email:    z.string().email({ message: 'Enter a valid email address' }),
     password: z.string().min(1, { message: 'Password is required' }),
 });
-type LoginForm = z.infer<typeof loginSchema>;
+type LoginFormValues = z.infer<typeof loginSchema>;
 
 function isSafeRedirect(path: string): boolean {
     return path.startsWith('/') && !path.startsWith('//') && !path.includes(':');
@@ -38,11 +38,11 @@ function LoginForm() {
         { icon: Star,    text: t('auth.feature4') },
     ];
 
-    const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginForm>({
+    const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginFormValues>({
         resolver: zodResolver(loginSchema),
     });
 
-    const onSubmit = async (data: LoginForm) => {
+    const onSubmit = async (data: LoginFormValues) => {
         try {
             const { role } = await login(data.email, data.password);
             toast.success(t('auth.loginSuccess'));
@@ -80,7 +80,7 @@ function LoginForm() {
                     </div>
                     <h2 className="text-4xl font-black text-white leading-tight mb-3">
                         {t('auth.rentSmarter')}<br />
-                        Farm <span className="text-yellow-400">{t('auth.farmBetter')}</span>
+                        <span className="text-yellow-400">{t('auth.farmBetter')}</span>
                     </h2>
                     <p className="text-green-200 text-base leading-relaxed mb-8">
                         {t('auth.signInAccess')}

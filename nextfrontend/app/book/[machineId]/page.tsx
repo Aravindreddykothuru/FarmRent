@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -9,50 +9,67 @@ import { Badge } from '@/components/ui/badge';
 import {
     IndianRupee, Calendar, CheckCircle2, CreditCard,
     ChevronLeft, Loader2, AlertCircle, MapPin, Info,
-    Truck, Store, Tag, X, Bike, Banknote,
+    Truck, Store, Tag, X, Banknote,
 } from 'lucide-react';
 import { nodeApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { getMachineId, type Machine as BaseMachine } from '@/lib/getMachineId';
 import { useRazorpay } from '@/hooks/useRazorpay';
+import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 
 interface Machine extends BaseMachine {
     type: string;
     images?: string[];
     location?: { district?: string; state?: string };
-    pricing?: { baseRatePerDay?: number; baseRatePerHour?: number; securityDeposit?: number };
+    pricing?: { baseRatePerDay?: number; securityDeposit?: number };
 }
 interface BookedRange { start_date: string; end_date: string; status: string }
+
+/** Server price breakdown — GET /api/v1/bookings/quote. The booking is created at exactly this price. */
+interface Quote {
+    days: number;
+    dailyRate: number;
+    subtotal: number;
+    serviceFee: number;
+    deposit: number;
+    deliveryCharge: number;
+    discount: number;
+    total: number;
+    available: boolean;
+    promoLabel: string | null;
+}
+interface PricingSettings { serviceFeePercent: number; deliveryCharge: number }
+interface CreatedBooking { id: string; totalAmount: number }
 
 type Step = 1 | 2;
 type Gateway = 'razorpay' | 'cod';
 type DeliveryMode = 'pickup' | 'delivery';
 
-const DELIVERY_CHARGE = 500;
-
-const toDate = (s: string) => new Date(s + 'T00:00:00');
 const todayStr = () => new Date().toISOString().split('T')[0];
-const diffDays = (a: string, b: string) =>
-    Math.max(1, Math.ceil((toDate(b).getTime() - toDate(a).getTime()) / 86400000));
+const inr = (value: number) => `₹${value.toLocaleString('en-IN')}`;
+const errorMessage = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 
-const isOverlap = (s: string, e: string, ranges: BookedRange[]) =>
-    ranges.some(r => toDate(s) < new Date(r.end_date) && toDate(e) > new Date(r.start_date));
+// Dates are inclusive on both ends, matching the server's overlap rule.
+const isOverlap = (start: string, end: string, ranges: BookedRange[]) =>
+    ranges.some(r => start <= r.end_date && end >= r.start_date);
 
 export default function BookPage() {
     const { machineId } = useParams<{ machineId: string }>();
     const router = useRouter();
     const { t } = useLanguage();
+    const { user } = useAuth();
 
     const [machine, setMachine] = useState<Machine | null>(null);
     const [loading, setLoading] = useState(true);
     const [booked, setBooked] = useState<BookedRange[]>([]);
+    const [pricing, setPricing] = useState<PricingSettings | null>(null);
     const [step, setStep] = useState<Step>(1);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [gateway, setGateway] = useState<Gateway>('razorpay');
     const [submitting, setSubmitting] = useState(false);
-    const [bookingId, setBookingId] = useState<string | null>(null);
+    const [created, setCreated] = useState<CreatedBooking | null>(null);
 
     // Delivery mode
     const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('pickup');
@@ -60,55 +77,65 @@ export default function BookPage() {
 
     // Promo code
     const [promoCode, setPromoCode] = useState('');
-    const [promoApplied, setPromoApplied] = useState(false);
-    const [promoDiscount, setPromoDiscount] = useState(0);
-    const [promoLabel, setPromoLabel] = useState('');
+    const [appliedPromo, setAppliedPromo] = useState<string | null>(null);
     const [promoLoading, setPromoLoading] = useState(false);
+
+    // Quote
+    const [quote, setQuote] = useState<Quote | null>(null);
+    const [quoteLoading, setQuoteLoading] = useState(false);
+    const [quoteError, setQuoteError] = useState<string | null>(null);
 
     const { startCheckout } = useRazorpay();
 
     useEffect(() => {
         if (!machineId) return;
         Promise.all([
-            nodeApi.get<any>(`/machines/${machineId}`),
-            nodeApi.get<any>(`/bookings/availability/${machineId}`).catch(() => ({ data: [] })),
-        ]).then(([mRes, aRes]) => {
-            setMachine(mRes?.data ?? mRes?.machine ?? mRes);
-            const raw = aRes?.data ?? aRes;
-            setBooked(Array.isArray(raw) ? raw : []);
-        }).catch(() => toast.error('Could not load machine'))
+            nodeApi.get<Machine>(`/machines/${machineId}`),
+            nodeApi.get<BookedRange[]>(`/bookings/availability/${machineId}`),
+            nodeApi.get<PricingSettings>('/bookings/pricing'),
+        ]).then(([machineData, ranges, settings]) => {
+            setMachine(machineData);
+            setBooked(Array.isArray(ranges) ? ranges : []);
+            setPricing(settings);
+        }).catch((e: unknown) => toast.error(errorMessage(e, 'Could not load machine')))
             .finally(() => setLoading(false));
     }, [machineId]);
 
-    const totalDays    = startDate && endDate ? diffDays(startDate, endDate) : 0;
-    const rentalCost   = totalDays * (machine?.pricing?.baseRatePerDay ?? 0);
-    const serviceFee   = Math.round(rentalCost * 0.03);
-    const depositAmt   = machine?.pricing?.securityDeposit ?? 0;
-    const deliveryAmt  = deliveryMode === 'delivery' ? DELIVERY_CHARGE : 0;
-    const totalAmount  = Math.max(0, rentalCost + serviceFee + depositAmt + deliveryAmt - promoDiscount);
+    // Price the current selection on the server (debounced while dates are being picked).
+    useEffect(() => {
+        if (!machineId || !startDate || !endDate) {
+            setQuote(null);
+            setQuoteError(null);
+            return;
+        }
+        const params = new URLSearchParams({ equipment_id: machineId, start_date: startDate, end_date: endDate, delivery_mode: deliveryMode });
+        if (appliedPromo) params.set('promo_code', appliedPromo);
 
-    const dateConflict = startDate && endDate ? isOverlap(startDate, endDate, booked) : false;
+        let cancelled = false;
+        const timer = setTimeout(() => {
+            setQuoteLoading(true);
+            nodeApi.get<Quote>(`/bookings/quote?${params}`)
+                .then(q => { if (!cancelled) { setQuote(q); setQuoteError(null); } })
+                .catch((e: unknown) => { if (!cancelled) { setQuote(null); setQuoteError(errorMessage(e, 'Could not price these dates')); } })
+                .finally(() => { if (!cancelled) setQuoteLoading(false); });
+        }, 250);
+        return () => { cancelled = true; clearTimeout(timer); };
+    }, [machineId, startDate, endDate, deliveryMode, appliedPromo]);
+
+    const dateConflict = startDate && endDate ? isOverlap(startDate, endDate, booked) || quote?.available === false : false;
 
     /* ── Promo code validation ── */
     const handleApplyPromo = async () => {
         const code = promoCode.trim().toUpperCase();
         if (!code) { toast.error('Enter a promo code'); return; }
-        if (!startDate || !endDate) { toast.error('Select dates first to apply a promo'); return; }
+        if (!quote) { toast.error('Select dates first to apply a promo'); return; }
         setPromoLoading(true);
         try {
-            const res: any = await nodeApi.post('/bookings/promo/validate', {
-                code,
-                amount: rentalCost,
-            });
-            const discount = res?.discount ?? res?.data?.discount ?? 0;
-            const label    = res?.label ?? res?.data?.label ?? `${code} applied`;
-            setPromoDiscount(discount);
-            setPromoApplied(true);
-            setPromoLabel(label);
-            toast.success(`Promo applied! You save ₹${discount}`);
-        } catch (e: any) {
-            const msg = e?.message ?? 'Invalid or expired promo code';
-            toast.error(msg);
+            const res = await nodeApi.post<{ discount: number; label: string }>('/bookings/promo/validate', { code, amount: quote.subtotal });
+            setAppliedPromo(code);
+            toast.success(`Promo applied! You save ${inr(res.discount)}`);
+        } catch (e: unknown) {
+            toast.error(errorMessage(e, 'Invalid or expired promo code'));
         } finally {
             setPromoLoading(false);
         }
@@ -116,9 +143,7 @@ export default function BookPage() {
 
     const clearPromo = () => {
         setPromoCode('');
-        setPromoApplied(false);
-        setPromoDiscount(0);
-        setPromoLabel('');
+        setAppliedPromo(null);
     };
 
     /* ── Step 2: create booking ── */
@@ -127,42 +152,27 @@ export default function BookPage() {
             toast.error('Enter your field/delivery address to continue');
             return;
         }
+        const normalizedId = getMachineId(machine);
+        if (!normalizedId) {
+            toast.error('Machine ID is missing. Please go back and try again.');
+            return;
+        }
         setSubmitting(true);
         try {
-            const normalizedId = getMachineId(machine);
-            if (!normalizedId) {
-                toast.error('Machine ID is missing. Please go back and try again.');
-                return;
-            }
-            const res: any = await nodeApi.post('/bookings', {
+            // Only the selection is sent; the server prices the booking.
+            const booking = await nodeApi.post<CreatedBooking>('/bookings', {
                 machineId: normalizedId,
                 startDate,
                 endDate,
-                totalAmount,
                 paymentMethod: gateway,
                 deliveryMode,
                 fieldAddress: deliveryMode === 'delivery' ? fieldAddress.trim() : undefined,
-                promoCode: promoApplied ? promoCode.trim().toUpperCase() : undefined,
-                promoDiscount: promoApplied ? promoDiscount : 0,
+                promoCode: appliedPromo ?? undefined,
             });
-            const extractedId = res?.data?._id ?? res?._id ?? res?.data?.id;
-            if (!extractedId) {
-                toast.error('Failed to create booking. Please try again.');
-                setStep(1);
-                return;
-            }
-            setBookingId(extractedId);
+            setCreated(booking);
             setStep(2);
-        } catch (e: any) {
-            const msg = e?.message || 'Failed to create booking';
-            if (String(msg).toLowerCase().includes('unauthorized')) {
-                toast.error('Please login to book equipment');
-                const next = `/book/${encodeURIComponent(String(machineId))}`;
-                router.push(`/login?next=${encodeURIComponent(next)}`);
-            } else {
-                toast.error(msg);
-            }
-            setStep(1);
+        } catch (e: unknown) {
+            toast.error(errorMessage(e, 'Failed to create booking'));
         } finally {
             setSubmitting(false);
         }
@@ -170,27 +180,19 @@ export default function BookPage() {
 
     /* ── Step 3: Payment (Razorpay or COD) ── */
     const handlePayment = async () => {
+        if (!created) return;
         setSubmitting(true);
         try {
-            // Cash on Delivery — no payment gateway needed
             if (gateway === 'cod') {
-                toast.success('Booking confirmed! Pay when equipment arrives.');
-                router.push(`/payment/success?bookingId=${encodeURIComponent(bookingId ?? '')}&method=cod`);
+                toast.success('Booking request sent! The owner will confirm it shortly.');
+                router.push(`/payment/success?bookingId=${encodeURIComponent(created.id)}&method=cod`);
                 return;
             }
-
-            // Online payment via Razorpay
-            const user = {
-                full_name: (typeof window !== 'undefined' && localStorage.getItem('full_name')) || 'Farmer',
-                email:     (typeof window !== 'undefined' && localStorage.getItem('email'))     || 'farmer@example.com',
-                phone:     (typeof window !== 'undefined' && localStorage.getItem('phone'))     || '',
-            };
+            const profile = user as (typeof user & { phone?: string | null }) | null;
             await startCheckout({
-                amountInInr: totalAmount,
-                user,
-                receipt: bookingId ?? undefined,
-                notes: { bookingId: bookingId ?? '' },
-                onCancelled: () => { toast.error('Payment cancelled'); },
+                bookingId: created.id,
+                user: { full_name: profile?.name ?? '', email: profile?.email ?? '', phone: profile?.phone ?? '' },
+                onCancelled: () => { toast.error('Payment cancelled — your booking request is saved, you can pay later.'); },
                 onSuccess: (orderId) => {
                     router.push(`/payment/success?orderId=${encodeURIComponent(orderId)}`);
                 },
@@ -200,10 +202,8 @@ export default function BookPage() {
         }
     };
 
-    const upcomingConflicts = booked.filter(b => {
-        const d = new Date(b.end_date);
-        return !isNaN(d.getTime()) && d >= new Date();
-    }).slice(0, 3);
+    const today = todayStr();
+    const upcomingConflicts = booked.filter(b => b.end_date >= today).slice(0, 3);
 
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center">
@@ -219,6 +219,48 @@ export default function BookPage() {
     );
 
     const steps = [t('booking.confirmBooking'), t('booking.payNow')];
+
+    const breakdown = quote && (
+        <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+                <span className="text-gray-600">{t('booking.duration')}</span>
+                <span className="font-medium">{quote.days} day{quote.days !== 1 ? 's' : ''}</span>
+            </div>
+            <div className="flex justify-between text-gray-500">
+                <span>{t('booking.rentalCost')}</span>
+                <span>{inr(quote.subtotal)}</span>
+            </div>
+            <div className="flex justify-between text-gray-500">
+                <span>{t('booking.serviceFee')}{pricing ? ` (${pricing.serviceFeePercent}%)` : ''}</span>
+                <span>{inr(quote.serviceFee)}</span>
+            </div>
+            {quote.deposit > 0 && (
+                <div className="flex justify-between text-gray-500">
+                    <span>Security Deposit</span>
+                    <span>{inr(quote.deposit)}</span>
+                </div>
+            )}
+            {quote.deliveryCharge > 0 && (
+                <div className="flex justify-between text-amber-600">
+                    <span className="flex items-center gap-1"><Truck className="h-3 w-3" /> Delivery Charge</span>
+                    <span>{inr(quote.deliveryCharge)}</span>
+                </div>
+            )}
+            {quote.discount > 0 && (
+                <div className="flex justify-between text-green-600">
+                    <span className="flex items-center gap-1"><Tag className="h-3 w-3" /> Promo Discount</span>
+                    <span>−{inr(quote.discount)}</span>
+                </div>
+            )}
+            <div className="flex justify-between font-bold pt-2 border-t mt-1 text-base text-green-700">
+                <span>{t('booking.total')}</span>
+                <span data-testid="quote-total">{inr(quote.total)}</span>
+            </div>
+            {quote.deposit > 0 && (
+                <p className="text-[10px] text-gray-400">* Deposit of {inr(quote.deposit)} refunded after equipment return</p>
+            )}
+        </div>
+    );
 
     return (
         <div className="min-h-screen bg-gray-50 py-8">
@@ -281,7 +323,7 @@ export default function BookPage() {
                                             type="date"
                                             id="start-date"
                                             suppressHydrationWarning
-                                            min={todayStr()}
+                                            min={today}
                                             className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-600 outline-none"
                                             value={startDate}
                                             onChange={e => {
@@ -299,7 +341,7 @@ export default function BookPage() {
                                             type="date"
                                             id="end-date"
                                             suppressHydrationWarning
-                                            min={startDate || todayStr()}
+                                            min={startDate || today}
                                             className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-600 outline-none"
                                             value={endDate}
                                             onChange={e => { setEndDate(e.target.value); clearPromo(); }}
@@ -313,7 +355,7 @@ export default function BookPage() {
                                         {upcomingConflicts.map((r, i) => (
                                             <div key={i} className="flex justify-between items-center">
                                                 <span>{new Date(r.start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – {new Date(r.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
-                                                <Badge variant="outline" className="text-[9px] h-4 px-1.5 capitalize">{r.status}</Badge>
+                                                <Badge variant="outline" className="text-[9px] h-4 px-1.5 capitalize">{r.status.replace(/_/g, ' ')}</Badge>
                                             </div>
                                         ))}
                                     </div>
@@ -341,7 +383,7 @@ export default function BookPage() {
                                         >
                                             <Store className={`h-6 w-6 ${deliveryMode === 'pickup' ? 'text-green-700' : 'text-gray-400'}`} />
                                             <span>Self-Pickup</span>
-                                            <span className="text-[10px] font-normal text-gray-500">Pick up from owner's yard</span>
+                                            <span className="text-[10px] font-normal text-gray-500">Pick up from owner&apos;s yard</span>
                                             <span className="text-[10px] font-bold text-green-700">Free</span>
                                         </button>
                                         <button
@@ -356,7 +398,7 @@ export default function BookPage() {
                                             <Truck className={`h-6 w-6 ${deliveryMode === 'delivery' ? 'text-green-700' : 'text-gray-400'}`} />
                                             <span>Delivery to Field</span>
                                             <span className="text-[10px] font-normal text-gray-500">Delivered to your location</span>
-                                            <span className="text-[10px] font-bold text-amber-600">+₹{DELIVERY_CHARGE}</span>
+                                            {pricing && <span className="text-[10px] font-bold text-amber-600">+{inr(pricing.deliveryCharge)}</span>}
                                         </button>
                                     </div>
                                 </div>
@@ -364,10 +406,11 @@ export default function BookPage() {
                                 {/* ── Field/delivery address ── */}
                                 {deliveryMode === 'delivery' && (
                                     <div>
-                                        <label className="block text-sm font-semibold mb-2">
+                                        <label htmlFor="field-address" className="block text-sm font-semibold mb-2">
                                             <MapPin className="h-4 w-4 inline mr-1 text-green-700" /> Delivery Address / Field Location
                                         </label>
                                         <textarea
+                                            id="field-address"
                                             rows={2}
                                             placeholder="e.g. Survey No. 45, Rampur Village, Near Water Tank, Nagpur Taluk"
                                             value={fieldAddress}
@@ -380,15 +423,15 @@ export default function BookPage() {
 
                                 {/* ── Promo code ── */}
                                 <div>
-                                    <label className="block text-sm font-semibold mb-2">
+                                    <label htmlFor="promo-code" className="block text-sm font-semibold mb-2">
                                         <Tag className="h-4 w-4 inline mr-1 text-green-700" /> Promo Code
                                     </label>
-                                    {promoApplied ? (
+                                    {appliedPromo ? (
                                         <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5">
                                             <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
                                             <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-bold text-green-800">{promoLabel}</p>
-                                                <p className="text-xs text-green-600">You save ₹{promoDiscount.toLocaleString('en-IN')}</p>
+                                                <p className="text-sm font-bold text-green-800">{quote?.promoLabel ?? `${appliedPromo} applied`}</p>
+                                                {quote && <p className="text-xs text-green-600">You save {inr(quote.discount)}</p>}
                                             </div>
                                             <button
                                                 type="button"
@@ -402,6 +445,7 @@ export default function BookPage() {
                                     ) : (
                                         <div className="flex gap-2">
                                             <input
+                                                id="promo-code"
                                                 type="text"
                                                 placeholder="Enter promo code (e.g. FARM100)"
                                                 value={promoCode}
@@ -428,47 +472,11 @@ export default function BookPage() {
                                     <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">{t('booking.costBreakdown')}</h3>
                                     {!startDate || !endDate ? (
                                         <p className="text-gray-400 text-xs italic text-center py-6">{t('booking.selectDatesToSeePrice')}</p>
-                                    ) : (
-                                        <div className="space-y-2 text-sm">
-                                            <div className="flex justify-between">
-                                                <span className="text-gray-600">{t('booking.duration')}</span>
-                                                <span className="font-medium">{totalDays} days</span>
-                                            </div>
-                                            <div className="flex justify-between text-gray-500">
-                                                <span>{t('booking.rentalCost')}</span>
-                                                <span>₹{rentalCost.toLocaleString('en-IN')}</span>
-                                            </div>
-                                            <div className="flex justify-between text-gray-500">
-                                                <span>{t('booking.serviceFee')} (3%)</span>
-                                                <span>₹{serviceFee.toLocaleString('en-IN')}</span>
-                                            </div>
-                                            {depositAmt > 0 && (
-                                                <div className="flex justify-between text-gray-500">
-                                                    <span>Security Deposit</span>
-                                                    <span>₹{depositAmt.toLocaleString('en-IN')}</span>
-                                                </div>
-                                            )}
-                                            {deliveryMode === 'delivery' && (
-                                                <div className="flex justify-between text-amber-600">
-                                                    <span className="flex items-center gap-1"><Truck className="h-3 w-3" /> Delivery Charge</span>
-                                                    <span>₹{DELIVERY_CHARGE.toLocaleString('en-IN')}</span>
-                                                </div>
-                                            )}
-                                            {promoApplied && promoDiscount > 0 && (
-                                                <div className="flex justify-between text-green-600">
-                                                    <span className="flex items-center gap-1"><Tag className="h-3 w-3" /> Promo Discount</span>
-                                                    <span>−₹{promoDiscount.toLocaleString('en-IN')}</span>
-                                                </div>
-                                            )}
-                                            <div className="flex justify-between font-bold pt-2 border-t mt-1 text-base text-green-700">
-                                                <span>{t('booking.total')}</span>
-                                                <span>₹{totalAmount.toLocaleString('en-IN')}</span>
-                                            </div>
-                                            {depositAmt > 0 && (
-                                                <p className="text-[10px] text-gray-400">* Deposit of ₹{depositAmt.toLocaleString('en-IN')} refunded after equipment return</p>
-                                            )}
-                                        </div>
-                                    )}
+                                    ) : quoteLoading && !quote ? (
+                                        <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-green-700" /></div>
+                                    ) : quoteError ? (
+                                        <p className="text-red-600 text-xs text-center py-4">{quoteError}</p>
+                                    ) : breakdown}
                                 </div>
 
                                 {/* ── Payment Method ── */}
@@ -487,7 +495,7 @@ export default function BookPage() {
                                             <CreditCard className={`h-6 w-6 ${gateway === 'razorpay' ? 'text-green-700' : 'text-gray-400'}`} />
                                             <span>Online Payment</span>
                                             <span className="text-[10px] font-normal text-gray-500">UPI, Card, Netbanking</span>
-                                            <span className="text-[10px] font-bold text-green-700">Instant confirm</span>
+                                            <span className="text-[10px] font-bold text-green-700">Refunded if declined</span>
                                         </button>
                                         <button
                                             type="button"
@@ -509,18 +517,18 @@ export default function BookPage() {
                                 <Button
                                     className="w-full bg-green-700 hover:bg-green-800 rounded-2xl py-6 text-base font-bold shadow-md"
                                     onClick={handleStep2}
-                                    disabled={dateConflict || !startDate || !endDate || submitting}
+                                    disabled={Boolean(dateConflict) || !quote || quoteLoading || submitting}
                                 >
                                     {submitting
-                                        ? <><Loader2 className="h-5 w-5 animate-spin mr-2" /> Creating Booking…</>
-                                        : <><CheckCircle2 className="mr-2" /> Confirm & Proceed to Pay</>
+                                        ? <><Loader2 className="h-5 w-5 animate-spin mr-2" /> Sending Request…</>
+                                        : <><CheckCircle2 className="mr-2" /> Request Booking</>
                                     }
                                 </Button>
                             </div>
                         )}
 
                         {/* ── Step 2: Payment ── */}
-                        {step === 2 && (
+                        {step === 2 && created && (
                             <div className="space-y-6">
                                 <div className="text-center">
                                     <div className="inline-flex items-center justify-center bg-green-100 rounded-full w-16 h-16 mb-4">
@@ -530,41 +538,7 @@ export default function BookPage() {
                                     <p className="text-gray-500 text-sm">{t('booking.slotHeld')}</p>
                                 </div>
 
-                                {/* Order summary pill */}
-                                <div className="bg-gray-50 rounded-2xl p-4 space-y-2 text-sm">
-                                    <div className="flex justify-between text-gray-600">
-                                        <span>Rental ({totalDays} day{totalDays !== 1 ? 's' : ''})</span>
-                                        <span>₹{rentalCost.toLocaleString('en-IN')}</span>
-                                    </div>
-                                    <div className="flex justify-between text-gray-600">
-                                        <span>Service fee</span>
-                                        <span>₹{serviceFee.toLocaleString('en-IN')}</span>
-                                    </div>
-                                    {depositAmt > 0 && (
-                                        <div className="flex justify-between text-gray-600">
-                                            <span>Security deposit</span>
-                                            <span>₹{depositAmt.toLocaleString('en-IN')}</span>
-                                        </div>
-                                    )}
-                                    {deliveryMode === 'delivery' && (
-                                        <div className="flex justify-between text-amber-600">
-                                            <span>Delivery charge</span>
-                                            <span>₹{DELIVERY_CHARGE.toLocaleString('en-IN')}</span>
-                                        </div>
-                                    )}
-                                    {promoApplied && promoDiscount > 0 && (
-                                        <div className="flex justify-between text-green-600">
-                                            <span>Promo discount</span>
-                                            <span>−₹{promoDiscount.toLocaleString('en-IN')}</span>
-                                        </div>
-                                    )}
-                                    <div className="flex justify-between font-bold text-base text-green-700 pt-2 border-t">
-                                        <span>Total</span>
-                                        <span className="flex items-center gap-0.5">
-                                            <IndianRupee className="h-4 w-4" />{totalAmount.toLocaleString('en-IN')}
-                                        </span>
-                                    </div>
-                                </div>
+                                {quote && <div className="bg-gray-50 rounded-2xl p-4">{breakdown}</div>}
 
                                 {deliveryMode === 'delivery' && fieldAddress && (
                                     <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-xs text-blue-700">
@@ -577,7 +551,7 @@ export default function BookPage() {
                                     <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-center space-y-2">
                                         <Banknote className="h-8 w-8 text-amber-600 mx-auto" />
                                         <p className="font-bold text-amber-800">Cash on Delivery Selected</p>
-                                        <p className="text-sm text-amber-700">Pay ₹{totalAmount.toLocaleString('en-IN')} in cash when the equipment arrives at your location.</p>
+                                        <p className="text-sm text-amber-700">Pay {inr(created.totalAmount)} in cash when the equipment arrives.</p>
                                     </div>
                                 ) : (
                                     <div className="flex items-center justify-center gap-2 text-sm font-medium text-gray-600">
@@ -597,23 +571,15 @@ export default function BookPage() {
                                     {submitting
                                         ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing…</>
                                         : gateway === 'cod'
-                                            ? <><Banknote className="mr-2 h-5 w-5" /> Confirm Booking — Pay on Delivery</>
-                                            : <><CreditCard className="mr-2 h-5 w-5" /> Pay ₹{totalAmount.toLocaleString('en-IN')} Online</>
+                                            ? <><Banknote className="mr-2 h-5 w-5" /> Done — Pay on Delivery</>
+                                            : <><CreditCard className="mr-2 h-5 w-5" /> Pay <IndianRupee className="h-4 w-4" />{created.totalAmount.toLocaleString('en-IN')} Online</>
                                     }
                                 </Button>
 
-                                <button
-                                    type="button"
-                                    onClick={() => setStep(1)}
-                                    className="w-full text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2"
-                                >
-                                    ← Go back and change payment method
-                                </button>
-
                                 <p className="text-xs text-center text-gray-400">
                                     {gateway === 'cod'
-                                        ? '💵 No advance payment required · Pay when equipment arrives'
-                                        : '🔒 Secured by Razorpay · 256-bit encryption'}
+                                        ? '💵 No advance payment required · The owner confirms your request'
+                                        : '🔒 Secured by Razorpay · Refunded automatically if the owner declines'}
                                 </p>
                             </div>
                         )}

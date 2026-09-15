@@ -79,7 +79,7 @@ export default function HowItWorksPage() {
     ];
 
     return (
-        <div className="bg-[#F7F8FA]">
+        <div className="bg-surface">
 
             {/* ── Hero ── */}
             <section className="relative bg-gradient-to-br from-green-950 via-green-900 to-green-800 py-16 lg:py-24 overflow-hidden">

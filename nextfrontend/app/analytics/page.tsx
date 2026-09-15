@@ -128,7 +128,7 @@ export default function AnalyticsPage() {
 
     if (loading || authLoading) {
         return (
-            <div className="min-h-screen bg-[#F7F8FA] p-6">
+            <div className="min-h-screen bg-surface p-6">
                 <div className="max-w-5xl mx-auto space-y-6">
                     <Skeleton className="h-8 w-48" />
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -142,7 +142,7 @@ export default function AnalyticsPage() {
     }
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             {/* Header */}
             <div className="bg-white border-b border-gray-100 px-6 py-4">
                 <div className="max-w-5xl mx-auto flex items-center gap-3">

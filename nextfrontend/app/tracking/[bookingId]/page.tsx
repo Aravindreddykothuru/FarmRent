@@ -19,6 +19,7 @@ import DriverInfoCard   from '@/components/DriverInfoCard';
 import TrackingMap      from '@/components/TrackingMap';
 import { useBookingSocket } from '@/hooks/useBookingSocket';
 import { nodeApi } from '@/lib/api';
+import { toast } from 'sonner';
 import { ArrowLeft, AlertCircle, MapPin, RotateCcw } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -157,7 +158,8 @@ export default function LiveTrackingPage() {
         try {
             await nodeApi.patch(`/bookings/${bookingId}/cancel`, {});
             setBooking(prev => prev ? { ...prev, status: 'cancelled' } : prev);
-        } catch {
+        } catch (e: unknown) {
+            toast.error(e instanceof Error && e.message ? e.message : 'Could not cancel the booking');
         } finally {
             setCancelling(false);
         }

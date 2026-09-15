@@ -59,6 +59,8 @@ const BOOKING_STATUS: Record<string, string> = {
     confirmed: 'bg-green-100 text-green-700',
     accepted: 'bg-indigo-100 text-indigo-700',
     in_progress: 'bg-green-100 text-green-700',
+    return_pending: 'bg-indigo-100 text-indigo-700',
+    rejected: 'bg-red-100 text-red-600',
     cancelled: 'bg-red-100 text-red-600',
     completed: 'bg-gray-100 text-gray-600',
 };
@@ -112,7 +114,7 @@ export default function AdminDashboard() {
             setBookings(bRes?.data ?? []);
         }).catch(() => toast.error(t('admin.loadError')))
             .finally(() => setLoading(false));
-    }, []);
+    }, [t]);
 
     useEffect(loadData, [loadData]);
 
@@ -136,13 +138,13 @@ export default function AdminDashboard() {
     };
 
     if (authLoading) return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA]">
+        <div className="min-h-screen flex items-center justify-center bg-surface">
             <Loader2 className="h-10 w-10 animate-spin text-red-600" />
         </div>
     );
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             {/* Header */}
             <div className="bg-gradient-to-br from-slate-800 to-slate-900 text-white px-4 lg:px-8 py-8">
                 <div className="container mx-auto max-w-screen-xl">

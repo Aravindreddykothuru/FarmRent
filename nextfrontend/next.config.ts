@@ -1,11 +1,23 @@
+import path from "path";
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const BACKEND = process.env.INTERNAL_API_URL
     || process.env.NEXT_PUBLIC_API_URL
     || process.env.NEXT_PUBLIC_BACKEND_URL
-    || 'http://localhost:3001';
+    || 'http://localhost:3000'; // unified server port (Next.js + Express)
 
 const nextConfig: NextConfig = {
+    /* CDN Asset Prefix routing */
+    assetPrefix: process.env.CDN_URL || undefined,
+
+    /* Allow localtunnel + other dev proxy origins to access /_next/* resources
+       without the "Cross origin request detected" warning. */
+    allowedDevOrigins: [
+        '*.loca.lt',
+        'localhost',
+    ],
+
     /* Proxy all /api/v1 and /socket.io requests to the Node backend so
        the browser only ever talks to http://localhost:3000. */
     async rewrites() {
@@ -21,11 +33,14 @@ const nextConfig: NextConfig = {
         ];
     },
 
+    outputFileTracingRoot: path.join(__dirname, '..'),
+
     /* Tell Turbopack to compile lucide-react icons individually instead of
        tree-shaking the whole barrel file. Prevents the "Quote module factory
        not available after HMR update" runtime crash. */
     experimental: {
         optimizePackageImports: ['lucide-react'],
+        clientTraceMetadata: ['sentry-trace', 'baggage'],
     },
 
     /* Security headers + cache policy.
@@ -54,14 +69,23 @@ const nextConfig: NextConfig = {
         ];
     },
 
-    /* Allow images from common CDN / Supabase origins */
+    /* Allow images from common CDN / Supabase / AWS S3 origins */
     images: {
         remotePatterns: [
             { protocol: 'https', hostname: '*.supabase.co' },
             { protocol: 'https', hostname: 'images.unsplash.com' },
             { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
+            { protocol: 'https', hostname: '*.cloudfront.net' },
+            { protocol: 'https', hostname: '*.amazonaws.com' },
         ],
     },
 };
 
-export default nextConfig;
+const isSentryEnabled = !!process.env.SENTRY_AUTH_TOKEN;
+
+export default isSentryEnabled
+    ? withSentryConfig(nextConfig, {
+          silent: true,
+      } as any)
+    : nextConfig;
+

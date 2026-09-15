@@ -12,7 +12,7 @@ type State = 'loading' | 'success' | 'error' | 'no-token';
 export default function VerifyEmailPage() {
     return (
         <Suspense fallback={
-            <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA]">
+            <div className="min-h-screen flex items-center justify-center bg-surface">
                 <Loader2 className="w-8 h-8 animate-spin text-green-700" />
             </div>
         }>
@@ -53,7 +53,7 @@ function VerifyEmailInner() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA] px-4">
+        <div className="min-h-screen flex items-center justify-center bg-surface px-4">
             <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8 max-w-md w-full text-center">
 
                 {state === 'loading' && (

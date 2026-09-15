@@ -47,7 +47,6 @@ export default function DriverDashboard() {
     const [online, setOnline]           = useState(false);
     const [togglingOnline, setToggling] = useState(false);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
-    const [_userId, setUserId]           = useState<string | null>(null);
 
     // Active booking = first in_progress or accepted
     const activeBooking = bookings.find(b => ['accepted', 'in_progress'].includes(b.status)) || null;
@@ -61,23 +60,17 @@ export default function DriverDashboard() {
 
     // Load driver profile + user
     useEffect(() => {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
-        if (token) {
-            try {
-                const p = JSON.parse(atob(token.split('.')[1]));
-                setUserId(p.sub || p.id);
-            } catch { /* */ }
-        }
-
-        nodeApi.get<{ success: boolean; data: DriverProfile }>('/drivers/me')
-            .then(r => {
-                setDriver(r.data);
-                setOnline(r.data.is_available);
+        // The API client unwraps the envelope: this is the profile itself, or null for non-drivers.
+        nodeApi.get<DriverProfile | null>('/drivers/me')
+            .then(profile => {
+                if (!profile) {
+                    router.replace('/dashboard/driver/register');
+                    return;
+                }
+                setDriver(profile);
+                setOnline(profile.is_available);
             })
-            .catch(() => {
-                // Not a driver yet — redirect to register
-                router.replace('/dashboard/driver/register');
-            })
+            .catch((e: unknown) => toast.error(e instanceof Error ? e.message : 'Could not load your driver profile'))
             .finally(() => setLoading(false));
     }, [router]);
 
@@ -131,11 +124,16 @@ export default function DriverDashboard() {
         finally { setActionLoading(null); }
     };
 
-    // Complete trip
+    // Complete trip — like the owner, the driver needs the code shown on the renter's booking page
     const handleComplete = async (bookingId: string) => {
+        const otp = window.prompt("Enter the renter's 6-digit completion code")?.trim() ?? '';
+        if (!/^\d{6}$/.test(otp)) {
+            toast.error("Enter the 6-digit completion code from the renter's booking page");
+            return;
+        }
         setActionLoading(bookingId + '_complete');
         try {
-            await nodeApi.patch(`/bookings/${bookingId}/complete`, {});
+            await nodeApi.post('/drivers/trip/end', { booking_id: bookingId, otp });
             toast.success(t('driver.tripCompleted'));
             loadBookings();
         } catch { toast.error(t('driver.failedComplete')); }

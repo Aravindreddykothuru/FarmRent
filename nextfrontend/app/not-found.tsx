@@ -8,7 +8,7 @@ import { useLanguage } from '@/context/LanguageContext';
 export default function NotFound() {
     const { t } = useLanguage();
     return (
-        <div className="min-h-[80vh] flex items-center justify-center bg-[#F7F8FA] px-4">
+        <div className="min-h-[80vh] flex items-center justify-center bg-surface px-4">
             <div className="text-center max-w-lg">
                 {/* Illustration */}
                 <div className="relative inline-block mb-6">

@@ -57,7 +57,7 @@ export default function WishlistPage() {
     };
 
     if (authLoading || loading) return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             <div className="bg-white border-b px-4 py-6">
                 <Skeleton className="h-8 w-48" />
             </div>
@@ -70,7 +70,7 @@ export default function WishlistPage() {
     );
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             {/* Header */}
             <div className="bg-white border-b border-gray-100 shadow-sm">
                 <div className="container mx-auto px-4 lg:px-8 py-5 max-w-screen-xl flex items-center justify-between">

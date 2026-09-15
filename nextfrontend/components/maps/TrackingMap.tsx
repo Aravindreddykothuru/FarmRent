@@ -4,6 +4,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { LocationPoint } from '@/hooks/useEquipmentTracking';
+import { MAP_COLORS } from '@/lib/mapColors';
 
 interface TrackingMapProps {
   currentLocation:  LocationPoint | null;
@@ -21,7 +22,7 @@ function tractorIconHtml(signalLost: boolean) {
     <div style="
       display:flex;align-items:center;justify-content:center;
       width:40px;height:40px;
-      background:${signalLost ? '#9CA3AF' : '#16A34A'};
+      background:${signalLost ? MAP_COLORS.SIGNAL_LOST : MAP_COLORS.SIGNAL_LIVE};
       border-radius:50%;border:3px solid white;
       box-shadow:0 2px 8px rgba(0,0,0,0.3);
       font-size:20px;
@@ -34,7 +35,7 @@ function pickupIconHtml() {
     <div style="
       display:flex;align-items:center;justify-content:center;
       width:36px;height:36px;
-      background:#2563EB;border-radius:50%;border:3px solid white;
+      background:${MAP_COLORS.SIGNAL_CONNECTING};border-radius:50%;border:3px solid white;
       box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:18px;
     ">📍</div>`;
 }
@@ -117,8 +118,8 @@ export default function TrackingMap({
         if (currentLocation.accuracy) {
           const circle = L.circle([currentLocation.lat, currentLocation.lng], {
             radius:      currentLocation.accuracy,
-            color:       '#16A34A',
-            fillColor:   '#16A34A',
+            color:       MAP_COLORS.SIGNAL_LIVE,
+            fillColor:   MAP_COLORS.SIGNAL_LIVE,
             fillOpacity: 0.08,
             weight:      1,
           }).addTo(map);
@@ -128,7 +129,7 @@ export default function TrackingMap({
 
       // Path polyline — added only when showPath is true initially
       const polyline = L.polyline([], {
-        color:     '#3B82F6',
+        color:     MAP_COLORS.PATH_LINE,
         weight:    3,
         opacity:   0.65,
         dashArray: '6, 4',
@@ -186,8 +187,8 @@ export default function TrackingMap({
         if (!accuracyCircleRef.current) {
           const circle = L.circle(newLL, {
             radius:      currentLocation!.accuracy,
-            color:       '#16A34A',
-            fillColor:   '#16A34A',
+            color:       MAP_COLORS.SIGNAL_LIVE,
+            fillColor:   MAP_COLORS.SIGNAL_LIVE,
             fillOpacity: 0.08,
             weight:      1,
           }).addTo(mapRef.current as unknown as L.Map);

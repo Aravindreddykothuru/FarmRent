@@ -14,6 +14,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { MAP_COLORS } from '@/lib/mapColors';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -54,7 +55,7 @@ async function reverseGeocode(
 let _patched = false;
 function patchLeafletIcons() {
   if (_patched) return;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const L = require('leaflet');
   delete (L.Icon.Default.prototype as Record<string, unknown>)._getIconUrl;
   L.Icon.Default.mergeOptions({
@@ -70,7 +71,7 @@ function patchLeafletIcons() {
 const MapClickHandler = memo(function MapClickHandler({
   onMapClick,
 }: { onMapClick: (lat: number, lng: number) => void }) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const { useMapEvents } = require('react-leaflet');
   const cbRef = useRef(onMapClick);
   cbRef.current = onMapClick;
@@ -85,7 +86,7 @@ const MapClickHandler = memo(function MapClickHandler({
 const FlyToHandler = memo(function FlyToHandler({
   target,
 }: { target: [number, number] | null }) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const { useMap } = require('react-leaflet');
   const map     = useMap();
   const lastKey = useRef<string | null>(null);
@@ -100,7 +101,7 @@ const FlyToHandler = memo(function FlyToHandler({
 });
 
 const SizeWatcher = memo(function SizeWatcher() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const { useMap } = require('react-leaflet');
   const map = useMap();
   useEffect(() => {
@@ -114,9 +115,9 @@ const SizeWatcher = memo(function SizeWatcher() {
 // ── Inner (client-only) component ─────────────────────────────────────────────
 
 function PickerInner({ onChange, initialLat, initialLng, initialAddress, initialLandmark }: Props) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const { MapContainer, TileLayer, Marker, useMapEvents: _u } = require('react-leaflet');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const L = require('leaflet');
   patchLeafletIcons();
 
@@ -233,11 +234,11 @@ function PickerInner({ onChange, initialLat, initialLng, initialAddress, initial
         <div style="
           width:32px;height:32px;border-radius:50% 50% 50% 0;
           transform:rotate(-45deg);
-          background:linear-gradient(135deg,#ef4444,#b91c1c);
+          background:linear-gradient(135deg,${MAP_COLORS.PIN_RED_START},${MAP_COLORS.PIN_RED_END});
           border:3px solid white;
           box-shadow:0 4px 12px rgba(239,68,68,0.55);
         "></div>
-        <div style="width:2px;height:10px;background:#ef4444;margin-top:-2px;"></div>
+        <div style="width:2px;height:10px;background:${MAP_COLORS.PIN_RED_START};margin-top:-2px;"></div>
       </div>`,
     iconSize:   [32, 46],
     iconAnchor: [16, 46],

@@ -5,19 +5,59 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS Variables ─────────────────────────────────────────────────────────── */
+/* ── CSS Variables (Stitch Agro-Modernist System) ─────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --brand:      #15803d;
-  --brand-dark: #14532d;
-  --brand-light:#dcfce7;
+  /* Brand Tokens */
+  --background:               #f7fbf0;
+  --foreground:               #181d17;
+  --brand:                    #0d631b;
+  --brand-dark:               #002204;
+  --brand-light:              #cbffc2;
+  --brand-accent:             #75584d;
+
+  /* Extended Surface & Elevation Tokens */
+  --primary-container:        #2e7d32;
+  --primary-fixed:            #a3f69c;
+  --primary-fixed-dim:        #88d982;
+
+  --secondary-container:      #fed7ca;
+  --secondary-fixed:          #ffdbce;
+
+  --tertiary:                 #923357;
+  --tertiary-container:       #b14b6f;
+
+  --surface-container:        #ebefe5;
+  --surface-container-low:    #f1f5eb;
+  --surface-container-high:   #e5eadf;
+  --surface-container-highest:#e0e4da;
+  --surface-dim:              #d7dbd2;
+  --surface-variant:          #e0e4da;
+
+  --on-surface-variant:       #40493d;
+  --on-primary:               #ffffff;
+
+  --outline:                  #707a6c;
+  --outline-variant:          #bfcaba;
+  --inverse-surface:          #2d322b;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background:             #181d17;
+    --foreground:             #f7fbf0;
+
+    /* Dark Mode Elevated Surface Adaptations */
+    --surface-container:      #212720;
+    --surface-container-low:  #1d221c;
+    --surface-container-high: #293027;
+    --surface-container-highest: #323a30;
+    --surface-dim:            #121611;
+    --surface-variant:        #2d352b;
+
+    --on-surface-variant:     #c0c9bb;
+    --outline:                #899484;
+    --outline-variant:        #40493d;
+    --inverse-surface:        #e0e4da;
   }
 }
 
@@ -31,18 +71,34 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
 /* ── Custom scrollbar ─────────────────────────────────────────────────────── */
-::-webkit-scrollbar               { width: 5px; height: 5px; }
-::-webkit-scrollbar-track         { background: #f4f4f5; }
-::-webkit-scrollbar-thumb         { background: #16a34a; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover   { background: #15803d; }
+::-webkit-scrollbar               { width: 6px; height: 6px; }
+::-webkit-scrollbar-track         { background: #ebefe5; }
+::-webkit-scrollbar-thumb         { background: #0d631b; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover   { background: #2e7d32; }
 
 /* ── Focus ring ───────────────────────────────────────────────────────────── */
 *:focus-visible {
-  outline: 2px solid #16a34a;
+  outline: 2px solid #0d631b;
   outline-offset: 2px;
+}
+
+/* ── Stitch Ambient Elevation Cards ────────────────────────────────────────── */
+.stitch-card {
+  background: #ffffff;
+  border-radius: 1rem;
+  border: 1px solid #e0e4da;
+  box-shadow: 0 4px 20px -2px rgba(13, 99, 27, 0.05);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stitch-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px -4px rgba(13, 99, 27, 0.12);
+  border-color: #bfcaba;
 }
 
 /* ── Gradient text utility ────────────────────────────────────────────────── */

@@ -1,5 +1,5 @@
 'use client';
-/* eslint-disable @typescript-eslint/no-require-imports */
+ 
 
 /**
  * EquipmentMap – wraps all react-leaflet components in ONE dynamic import

@@ -11,7 +11,8 @@ import NotificationBell from '@/components/NotificationBell';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { nodeApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
-
+import { toast } from 'sonner';
+import { useClickOutside } from '@/hooks/useClickOutside';
 function useWishlistCount(isAuthenticated: boolean) {
     const [count, setCount] = useState(0);
     useEffect(() => {
@@ -23,14 +24,36 @@ function useWishlistCount(isAuthenticated: boolean) {
 
 function ProfileDropdown({ user, onLogout }: { user: any; onLogout: () => void }) {
     const { t } = useLanguage();
+    const pathname = usePathname();
+    const router = useRouter();
+    const { switchRole } = useAuth();
     const [open, setOpen] = useState(false);
-    const ref = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
 
+    // Auto-close dropdown on route change
     useEffect(() => {
-        const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, []);
+        setOpen(false);
+    }, [pathname]);
+
+    // Robust outside-click and Escape key handler
+    useClickOutside({
+        refs: [containerRef],
+        handler: () => setOpen(false),
+        enabled: open,
+    });
+
+    const toggleRoleMode = async () => {
+        const targetRole = user?.role === 'owner' ? 'farmer' : 'owner';
+        try {
+            await switchRole(targetRole);
+            setOpen(false);
+            toast.success(`Switched to ${targetRole === 'owner' ? 'Owner' : 'Renter'} mode`);
+            router.push(targetRole === 'owner' ? '/dashboard/owner' : '/dashboard/farmer');
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Failed to switch mode';
+            toast.error(msg);
+        }
+    };
 
     const dashboardHref = user?.role === 'owner' ? '/dashboard/owner'
         : user?.role === 'admin' ? '/dashboard/admin'
@@ -39,10 +62,16 @@ function ProfileDropdown({ user, onLogout }: { user: any; onLogout: () => void }
     const initial = user?.name?.[0]?.toUpperCase() || 'U';
 
     return (
-        <div className="relative" ref={ref}>
-            <button type="button" suppressHydrationWarning
+        <div className="relative" ref={containerRef}>
+            <button
+                type="button"
+                suppressHydrationWarning
                 onClick={() => setOpen(!open)}
-                className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 transition-colors">
+                aria-expanded={open}
+                aria-haspopup="true"
+                aria-label="User account menu"
+                className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 transition-colors"
+            >
                 <div className="bg-gradient-to-br from-green-100 to-emerald-200 rounded-full h-8 w-8 flex items-center justify-center text-green-700 font-bold text-sm">
                     {initial}
                 </div>
@@ -51,53 +80,101 @@ function ProfileDropdown({ user, onLogout }: { user: any; onLogout: () => void }
             </button>
 
             {open && (
-                <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 py-2 z-50">
+                <div
+                    role="menu"
+                    aria-orientation="vertical"
+                    aria-label="Profile navigation menu"
+                    className="absolute right-0 top-full mt-2 w-60 bg-white rounded-2xl shadow-xl border border-gray-100 py-2 z-50 overflow-hidden"
+                >
                     {/* User info */}
                     <div className="px-4 py-3 border-b border-gray-100">
                         <p className="font-bold text-gray-900 text-sm">{user?.name}</p>
-                        <p className="text-xs text-gray-400 capitalize">{user?.role}</p>
+                        <p className="text-xs text-gray-400 capitalize">{user?.role === 'owner' ? 'Owner' : 'Renter'}</p>
+                    </div>
+
+                    {/* Quick Role Mode Switcher */}
+                    <div className="border-b border-gray-100">
+                        <button
+                            type="button"
+                            onClick={toggleRoleMode}
+                            className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-colors"
+                        >
+                            <span>Switch to {user?.role === 'owner' ? '🌾 Renter Mode' : '🚜 Owner Mode'}</span>
+                            <span className="text-[10px] uppercase font-bold bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded">
+                                Switch
+                            </span>
+                        </button>
                     </div>
 
                     <div className="py-1">
-                        <Link href={dashboardHref} onClick={() => setOpen(false)}
-                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                        <Link
+                            href={dashboardHref}
+                            role="menuitem"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
                             <LayoutDashboard className="h-4 w-4 text-green-600" /> {t('nav.dashboard')}
                         </Link>
-                        <Link href="/bookings" onClick={() => setOpen(false)}
-                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                        <Link
+                            href="/bookings"
+                            role="menuitem"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
                             <BookOpen className="h-4 w-4 text-blue-600" /> {t('nav.bookings')}
                         </Link>
-                        <Link href="/chats" onClick={() => setOpen(false)}
-                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                        <Link
+                            href="/chats"
+                            role="menuitem"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
                             <MessageSquare className="h-4 w-4 text-green-600" /> {t('nav.messages')}
                         </Link>
-                        <Link href="/wallet" onClick={() => setOpen(false)}
-                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                        <Link
+                            href="/wallet"
+                            role="menuitem"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
                             <Wallet className="h-4 w-4 text-yellow-600" /> FarmWallet
                         </Link>
-                        <Link href="/notifications" onClick={() => setOpen(false)}
-                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                        <Link
+                            href="/notifications"
+                            role="menuitem"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
                             <Bell className="h-4 w-4 text-purple-600" /> Notifications
                         </Link>
-                        <Link href="/offers" onClick={() => setOpen(false)}
-                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                        <Link
+                            href="/offers"
+                            role="menuitem"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
                             <Tag className="h-4 w-4 text-indigo-600" /> {t('nav.offers')}
                         </Link>
                         {user?.role === 'owner' && (
-                            <Link href="/add-equipment" onClick={() => setOpen(false)}
-                                className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                            <Link
+                                href="/add-equipment"
+                                role="menuitem"
+                                className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                            >
                                 <PlusCircle className="h-4 w-4 text-emerald-600" /> {t('nav.addEquipment')}
                             </Link>
                         )}
-                        <Link href="/dashboard/profile" onClick={() => setOpen(false)}
-                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                        <Link
+                            href="/dashboard/profile"
+                            role="menuitem"
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
                             <Settings className="h-4 w-4 text-gray-500" /> {t('nav.settings')}
                         </Link>
                     </div>
 
                     <div className="border-t border-gray-100 py-1">
-                        <button type="button" suppressHydrationWarning onClick={() => { setOpen(false); onLogout(); }}
-                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors">
+                        <button
+                            type="button"
+                            role="menuitem"
+                            suppressHydrationWarning
+                            onClick={() => { setOpen(false); onLogout(); }}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors text-left"
+                        >
                             <LogOut className="h-4 w-4" /> {t('nav.logout')}
                         </button>
                     </div>
@@ -135,34 +212,34 @@ export default function Navbar() {
 
     return (
         <>
-            <nav className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-100 shadow-sm">
+            <nav className="sticky top-0 z-50 bg-surface/95 backdrop-blur-md border-b border-outline-variant/50 shadow-sm transition-colors duration-200">
                 <div className="container mx-auto px-4 lg:px-8 max-w-screen-xl">
                     <div className="flex items-center justify-between h-16 gap-4">
                         {/* Logo */}
-                        <Link href="/" className="flex items-center gap-2 flex-shrink-0">
-                            <div className="bg-green-700 rounded-xl p-2 shadow-sm">
-                                <Tractor className="h-5 w-5 text-white" />
+                        <Link href="/" className="flex items-center gap-2.5 flex-shrink-0 group">
+                            <div className="bg-primary rounded-xl p-2 shadow-sm group-hover:bg-primary-container transition-colors">
+                                <Tractor className="h-5 w-5 text-on-primary" />
                             </div>
-                            <span className="text-xl font-black text-green-700">FarmRent</span>
+                            <span className="text-xl font-black text-primary tracking-tight">FarmRent</span>
                         </Link>
 
                         {/* Desktop nav links */}
                         <div className="hidden md:flex items-center gap-1">
                             {mainLinks.map(link => (
                                 <Link key={link.href} href={link.href}
-                                    className={cn('px-3 py-2 rounded-xl text-sm font-semibold transition-colors',
+                                    className={cn('px-3.5 py-2 rounded-xl text-sm font-semibold transition-all',
                                         isActive(link.href)
-                                            ? 'bg-green-50 text-green-700'
-                                            : 'text-gray-600 hover:text-green-700 hover:bg-gray-50')}>
+                                            ? 'bg-primary-container/15 text-primary border-b-2 border-primary'
+                                            : 'text-on-surface-variant hover:text-primary hover:bg-surface-container-high')}>
                                     {link.label}
                                 </Link>
                             ))}
                             {isAuthenticated && (
                                 <Link href={dashboardHref}
-                                    className={cn('px-3 py-2 rounded-xl text-sm font-semibold transition-colors',
+                                    className={cn('px-3.5 py-2 rounded-xl text-sm font-semibold transition-all',
                                         isActive('/dashboard')
-                                            ? 'bg-green-50 text-green-700'
-                                            : 'text-gray-600 hover:text-green-700 hover:bg-gray-50')}>
+                                            ? 'bg-primary-container/15 text-primary border-b-2 border-primary'
+                                            : 'text-on-surface-variant hover:text-primary hover:bg-surface-container-high')}>
                                     {t('nav.dashboard')}
                                 </Link>
                             )}

@@ -20,6 +20,14 @@ import { cn } from '@/lib/utils';
 
 const FALLBACK = 'https://images.unsplash.com/photo-1560493676-04071c5f467b?w=400&q=60';
 
+// Accepted rentals that still need the owner: hand over, run, or close out with the renter's code.
+const ACTIVE_OWNER_STATUSES = ['confirmed', 'in_progress', 'return_pending'];
+const ACTIVE_STATUS_BADGE: Record<string, { label: string; className: string }> = {
+    confirmed:      { label: 'Confirmed',      className: 'bg-green-100 text-green-700' },
+    in_progress:    { label: 'In Progress',    className: 'bg-blue-100 text-blue-700' },
+    return_pending: { label: 'Return Pending', className: 'bg-indigo-100 text-indigo-700' },
+};
+
 interface Booking {
     id?: string; _id?: string;
     status: string;
@@ -78,17 +86,16 @@ export default function OwnerDashboard() {
         setLoading(true);
         Promise.all([
             nodeApi.get<any>('/machines?owner=me').catch(() => ({ data: [] })),
-            nodeApi.get<any>('/bookings/incoming?status=pending').catch(() => ({ bookings: [] })),
-            nodeApi.get<any>('/bookings/incoming?status=confirmed').catch(() => ({ bookings: [] })),
+            nodeApi.get<any>('/bookings/incoming?status=pending'),
+            nodeApi.get<any>('/bookings/incoming?status=all&limit=100'),
         ]).then(([mRes, bRes, aRes]) => {
-            setMachines(mRes?.data ?? mRes?.machines ?? []);
-            const raw = bRes?.bookings ?? bRes?.data ?? [];
-            setIncoming(Array.isArray(raw) ? raw : []);
-            const activeRaw = aRes?.bookings ?? aRes?.data ?? [];
-            setActive(Array.isArray(activeRaw) ? activeRaw : []);
+            setMachines(mRes?.data ?? []);
+            setIncoming(bRes?.bookings ?? []);
+            // Accepted rentals the owner still has to hand over, run, or close out.
+            setActive((aRes?.bookings ?? []).filter((b: Booking) => ACTIVE_OWNER_STATUSES.includes(b.status)));
         }).catch(() => toast.error(t('dashboard.loadDashboardError')))
             .finally(() => setLoading(false));
-    }, []);
+    }, [t]);
 
     const startGps = (bookingId: string) => {
         if (!navigator.geolocation) { toast.error('GPS not supported by this browser'); return; }
@@ -120,14 +127,20 @@ export default function OwnerDashboard() {
 
     useEffect(fetchData, [fetchData]);
 
-    const handleAction = async (bookingId: string, action: 'accept' | 'reject') => {
+    const ACTION_SUCCESS = {
+        accept: t('dashboard.bookingAccepted'),
+        reject: t('dashboard.bookingRejected'),
+        start:  'Rental started — equipment handed over',
+    };
+
+    const handleAction = async (bookingId: string, action: keyof typeof ACTION_SUCCESS) => {
         setActing(bookingId);
         try {
             await nodeApi.patch(`/bookings/${bookingId}/${action}`, {});
-            toast.success(action === 'accept' ? t('dashboard.bookingAccepted') : t('dashboard.bookingRejected'));
+            toast.success(ACTION_SUCCESS[action]);
             fetchData();
-        } catch {
-            toast.error(t('dashboard.actionFailed'));
+        } catch (e: unknown) {
+            toast.error(e instanceof Error && e.message ? e.message : t('dashboard.actionFailed'));
         } finally { setActing(null); }
     };
 
@@ -147,18 +160,18 @@ export default function OwnerDashboard() {
     const totalRevenue = machines.reduce((s, m) => s + (m.totalRevenue ?? (m.totalBookings ?? 0) * (m.pricing?.baseRatePerDay ?? 0)), 0);
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             {/* Header */}
-            <div className="bg-gradient-to-br from-indigo-700 to-indigo-900 text-white px-4 lg:px-8 py-8">
+            <div className="bg-gradient-to-br from-primary via-primary-container to-brand-dark text-white px-4 lg:px-8 py-8">
                 <div className="container mx-auto max-w-screen-xl">
                     <div className="flex items-start justify-between gap-4 mb-6">
                         <div>
-                            <p className="text-indigo-200 text-sm font-medium mb-1">{t('dashboard.myEquipment')}</p>
+                            <p className="text-on-primary-container text-sm font-medium mb-1">{t('dashboard.myEquipment')}</p>
                             <h1 className="text-2xl lg:text-3xl font-black">{user?.name || 'Owner'} 🚜</h1>
-                            <p className="text-indigo-200 text-sm mt-1">{t('dashboard.incomingRequests')}</p>
+                            <p className="text-on-primary-container/80 text-sm mt-1">{t('dashboard.incomingRequests')}</p>
                         </div>
                         <Link href="/add-equipment">
-                            <Button className="bg-white text-indigo-700 hover:bg-indigo-50 font-bold rounded-xl shadow-md gap-1.5">
+                            <Button className="bg-white text-primary hover:bg-surface-container font-bold rounded-xl shadow-md gap-1.5">
                                 <PlusCircle className="h-4 w-4" /> {t('dashboard.addEquipment')}
                             </Button>
                         </Link>
@@ -323,8 +336,8 @@ export default function OwnerDashboard() {
                                                 <div className="flex-1 p-4 min-w-0">
                                                     <div className="flex items-start justify-between gap-2 mb-1">
                                                         <h3 className="font-bold text-sm text-gray-900 line-clamp-1">{machineName}</h3>
-                                                        <Badge className="bg-green-100 text-green-700 border-0 text-[10px] font-bold flex-shrink-0">
-                                                            <CheckCircle2 className="h-2.5 w-2.5 mr-1" /> Confirmed
+                                                        <Badge className={`${ACTIVE_STATUS_BADGE[b.status]?.className ?? 'bg-gray-100 text-gray-700'} border-0 text-[10px] font-bold flex-shrink-0`}>
+                                                            <CheckCircle2 className="h-2.5 w-2.5 mr-1" /> {ACTIVE_STATUS_BADGE[b.status]?.label ?? b.status}
                                                         </Badge>
                                                     </div>
                                                     <div className="flex items-center gap-1 text-xs text-gray-500 mb-1">
@@ -343,6 +356,19 @@ export default function OwnerDashboard() {
                                                             </span>
                                                         )}
                                                         <div className="flex gap-2 ml-auto">
+                                                            {b.status === 'confirmed' ? (
+                                                                <Button size="sm" className="h-8 text-xs gap-1 bg-green-700 hover:bg-green-800"
+                                                                    disabled={acting === id} onClick={() => handleAction(id, 'start')}>
+                                                                    {acting === id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                                                    Hand Over
+                                                                </Button>
+                                                            ) : (
+                                                                <Link href={`/bookings/${id}`}>
+                                                                    <Button size="sm" variant="outline" className="h-8 text-xs gap-1">
+                                                                        <CheckCircle2 className="h-3.5 w-3.5" /> Complete
+                                                                    </Button>
+                                                                </Link>
+                                                            )}
                                                             <Button
                                                                 size="sm"
                                                                 className={`h-8 text-xs gap-1 ${isOn ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-700 hover:bg-indigo-800'}`}

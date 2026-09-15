@@ -693,6 +693,8 @@
     "statusInProgress": "In Progress",
     "statusCompleted": "Completed",
     "statusCancelled": "Cancelled",
+    "statusConfirmed": "Confirmed",
+    "statusDisputed": "Disputed",
     "etaMinutes": "ETA: {minutes} min away",
     "reviews": "Reviews",
     "completedEmpty": "Your completed rentals will appear here.",

@@ -92,7 +92,7 @@ function computeStats(rows: LocationRow[]) {
 let _patched = false;
 function patchLeafletIcons() {
   if (_patched) return;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const L = require('leaflet');
   delete (L.Icon.Default.prototype as Record<string, unknown>)._getIconUrl;
   L.Icon.Default.mergeOptions({
@@ -106,7 +106,7 @@ function patchLeafletIcons() {
 // ── Map inner ─────────────────────────────────────────────────────────────────
 
 const SizeWatcher = memo(function SizeWatcher() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const { useMap } = require('react-leaflet');
   const map = useMap();
   useEffect(() => {
@@ -126,9 +126,9 @@ function HistoryMapInner({
   startPos: [number, number] | null;
   endPos:   [number, number] | null;
 }) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } = require('react-leaflet');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const L = require('leaflet');
   patchLeafletIcons();
 

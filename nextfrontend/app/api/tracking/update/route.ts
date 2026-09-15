@@ -120,8 +120,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // equipment_rentals is the canonical booking table (migration 009 onward)
   const { data: booking, error: bookingErr } = await supabaseAdmin
-    .from('bookings')
+    .from('equipment_rentals')
     .select('id, status, equipment_id')
     .eq('id', booking_id)
     .single();
@@ -133,7 +134,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const activeStatuses = ['confirmed', 'in_progress', 'active'];
+  // equipment_rentals status vocabulary: requested | approved | active | completed | cancelled | disputed
+  const activeStatuses = ['approved', 'active', 'confirmed', 'in_progress'];
   if (!activeStatuses.includes((booking as Record<string, string>).status)) {
     return NextResponse.json(
       { error: `Booking is not active (status: ${(booking as Record<string, string>).status})` },

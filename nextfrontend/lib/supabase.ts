@@ -61,17 +61,47 @@ export type Database = {
                     created_at: string;
                 };
             };
+            equipment_rentals: {
+                // Canonical booking table — introduced in migration 009_core_schema_overhaul
+                // Backend services exclusively use this table (not the old 'bookings' table).
+                Row: {
+                    id: string;
+                    equipment_id: string | null;
+                    renter_id: string | null;   // farmer who rented
+                    owner_id: string | null;
+                    driver_id: string | null;
+                    status: 'requested' | 'approved' | 'active' | 'completed' | 'cancelled' | 'disputed';
+                    start_date: string;
+                    end_date: string;
+                    total_days: number;
+                    daily_rate: number;
+                    total_amount: number;
+                    payment_method: string | null;
+                    payment_status: string | null;
+                    pickup_lat: number | null;
+                    pickup_lng: number | null;
+                    dropoff_lat: number | null;
+                    dropoff_lng: number | null;
+                    distance_km: number | null;
+                    eta_minutes: number | null;
+                    geofence_radius_km: number | null;
+                    notes: string | null;
+                    created_at: string;
+                };
+            };
+            // Legacy table — created in schema.sql, still present in DB
+            // Use equipment_rentals for all new code.
             bookings: {
                 Row: {
                     id: string;
                     equipment_id: string;
-                    farmer_id: string;
+                    renter_id: string;
                     owner_id: string;
                     start_date: string;
                     end_date: string;
-                    total_price: number;
-                    status: 'pending' | 'confirmed' | 'in_progress' | 'active' | 'returned' | 'cancelled' | 'completed';
-                    payment_status: string;
+                    total_amount: number;
+                    status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
+                    payment_method: string | null;
                     created_at: string;
                 };
             };

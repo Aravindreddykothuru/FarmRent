@@ -6,6 +6,23 @@
  * Node proxies /api/v2/* → Flask when Flask is running.
  */
 
+import { toast } from 'sonner';
+import { isProtectedPath } from './authRoutes';
+
+let lastNetworkToastTime = 0;
+function notifyNetworkError(description: string) {
+    if (typeof window === 'undefined') return;
+    const now = Date.now();
+    if (now - lastNetworkToastTime > 4000) {
+        lastNetworkToastTime = now;
+        toast.error('API Server Unreachable', {
+            id: 'network-error-toast',
+            description,
+            duration: 4000,
+        });
+    }
+}
+
 export function getApiBaseUrl(): string {
   const fromEnv = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
   if (fromEnv) return fromEnv;
@@ -25,39 +42,63 @@ function getFlaskApiBase(): string {
 }
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
-const getToken = (): string | null =>
-    typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+// Token is now sent automatically via httpOnly cookie.
 
-const authHeaders = (): Record<string, string> => {
-    const token = getToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
-};
+const authHeaders = (): Record<string, string> => ({});
+
+/**
+ * True when this browser holds a session. The server sets the readable authRole cookie next to the httpOnly
+ * token cookies (same lifetime as the refresh token) and clears it on logout.
+ */
+export function hasSessionHint(): boolean {
+    return typeof document !== 'undefined' && /(?:^|;\s*)authRole=[^;]+/.test(document.cookie);
+}
 
 // ─── Token refresh (deduped to avoid refresh storms on simultaneous 401s) ────
-let refreshPromise: Promise<string | null> | null = null;
+type RefreshOutcome = 'refreshed' | 'expired' | 'unavailable';
+let refreshPromise: Promise<RefreshOutcome> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+async function refreshAccessToken(): Promise<RefreshOutcome> {
     if (refreshPromise) return refreshPromise;
-    refreshPromise = fetch('/api/v1/auth/refresh', {
-        method: 'POST',
-        credentials: 'include',
-    }).then(async r => {
-        if (!r.ok) return null;
-        const d = await r.json();
-        if (d.token) {
-            localStorage.setItem('authToken', d.token);
-            return d.token as string;
-        }
-        return null;
-    }).catch(() => null).finally(() => { refreshPromise = null; });
+    refreshPromise = fetch(`${getNodeApiBase()}/auth/refresh`, { method: 'POST', credentials: 'include' })
+        // Only the server rejecting the refresh token ends the session; rate limits and outages do not.
+        .then((r): RefreshOutcome => (r.ok ? 'refreshed' : r.status === 401 || r.status === 403 ? 'expired' : 'unavailable'))
+        .catch((): RefreshOutcome => 'unavailable')
+        .finally(() => { refreshPromise = null; });
     return refreshPromise;
 }
 
-function clearSession() {
+function endExpiredSession() {
     if (typeof window === 'undefined') return;
-    localStorage.removeItem('authToken');
     document.cookie = 'authRole=; path=/; SameSite=Lax; max-age=0';
-    window.location.href = '/login?reason=session_expired';
+    // Public pages keep working signed out; protected pages return to login and come back afterwards.
+    const { pathname } = window.location;
+    if (isProtectedPath(pathname)) {
+        window.location.href = `/login?reason=session_expired&next=${encodeURIComponent(pathname)}`;
+    }
+}
+
+// ─── Unwrap standard API envelope { success, data, error, timestamp } ───────
+function unwrapEnvelope<T>(body: unknown): T {
+    if (
+        body &&
+        typeof body === 'object' &&
+        !Array.isArray(body) &&
+        'success' in body &&
+        'data' in body &&
+        'error' in body
+    ) {
+        const env = body as {
+            success: boolean;
+            data: T;
+            error: { message?: string } | null;
+        };
+        if (!env.success && env.error) {
+            throw new Error(env.error.message || 'Request failed');
+        }
+        return env.data;
+    }
+    return body as T;
 }
 
 // ─── Base fetch wrapper ───────────────────────────────────────────────────────
@@ -69,16 +110,21 @@ async function request<T>(
 ): Promise<T> {
     const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
 
+    const isFormData = options.body instanceof FormData;
+    const headers: Record<string, string> = {
+        ...authHeaders(),
+        ...(options.headers as Record<string, string> ?? {}),
+    };
+    if (!isFormData) {
+        headers['Content-Type'] = 'application/json';
+    }
+
     let res: Response;
     try {
         res = await fetch(url, {
             ...options,
             credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json',
-                ...authHeaders(),
-                ...(options.headers as Record<string, string> ?? {}),
-            },
+            headers,
         });
     } catch (e) {
         const hint =
@@ -86,16 +132,22 @@ async function request<T>(
                 ? ' API is configured for port 5000 but nothing is listening — use unified dev on :3000 or set NEXT_PUBLIC_API_URL in .env.local.'
                 : ' Check that the dev server is running and NEXT_PUBLIC_API_URL matches the API port.';
         const msg = e instanceof Error ? e.message : 'Network error';
-        throw new Error(`${msg}.${hint}`);
+        const fullErrorMsg = `${msg}.${hint}`;
+        notifyNetworkError(fullErrorMsg);
+        throw new Error(fullErrorMsg);
     }
 
-    // ── 401 → attempt silent token refresh, retry once ────────────────────────
-    if (res.status === 401 && !_isRetry) {
-        const newToken = await refreshAccessToken();
-        if (newToken) {
-            return request<T>(base, path, options, true);
+    // ── 401 → attempt silent token refresh, retry once (except auth login/register/reset endpoints) ──
+    const isAuthRequest = path.includes('/auth/login') || path.includes('/auth/register') || path.includes('/auth/forgot-password') || path.includes('/auth/reset-password');
+    if (res.status === 401 && !isAuthRequest && !path.includes('/auth/refresh')) {
+        // Signed-out visitor: nothing to refresh and nowhere to redirect — the caller decides what to show.
+        if (!hasSessionHint()) throw new Error('Please sign in to continue.');
+        if (!_isRetry) {
+            const outcome = await refreshAccessToken();
+            if (outcome === 'refreshed') return request<T>(base, path, options, true);
+            if (outcome === 'unavailable') throw new Error('Could not confirm your session right now. Please try again.');
         }
-        clearSession();
+        endExpiredSession();
         throw new Error('Session expired. Please log in again.');
     }
 
@@ -103,13 +155,20 @@ async function request<T>(
         let errorMsg = `HTTP ${res.status}`;
         try {
             const body = await res.json();
-            errorMsg = body.message ?? body.error ?? errorMsg;
+            if (body && typeof body === 'object') {
+                if (body.error && typeof body.error === 'object' && body.error.message) {
+                    errorMsg = body.error.message;
+                } else {
+                    errorMsg = body.message ?? body.error ?? errorMsg;
+                }
+            }
         } catch { /* ignore */ }
-        throw new Error(errorMsg);
+        throw new Error(String(errorMsg));
     }
 
     if (res.status === 204) return undefined as T;
-    return res.json() as Promise<T>;
+    const body = await res.json();
+    return unwrapEnvelope<T>(body);
 }
 
 // ─── Node.js API client (/api/v1) ─────────────────────────────────────────────
@@ -119,6 +178,7 @@ export const nodeApi = {
     put: <T>(path: string, body: unknown) => request<T>(getNodeApiBase(), path, { method: 'PUT', body: JSON.stringify(body) }),
     patch: <T>(path: string, body: unknown) => request<T>(getNodeApiBase(), path, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: <T>(path: string) => request<T>(getNodeApiBase(), path, { method: 'DELETE' }),
+    uploadForm: <T>(path: string, formData: FormData) => request<T>(getNodeApiBase(), path, { method: 'POST', body: formData }),
 };
 
 // ─── Flask API client (/api/v2 → Flask /api) ──────────────────────────────────
@@ -136,7 +196,11 @@ export const auth = {
         nodeApi.post<{ token: string; user: unknown }>('/auth/login', { email, password }),
     register: (data: unknown) =>
         nodeApi.post<{ token: string; user: unknown }>('/auth/register', data),
-    logout: () => { if (typeof window !== 'undefined') localStorage.removeItem('authToken'); },
+    logout: () =>
+        // Calls the backend to clear the httpOnly session cookie. Also clears any legacy localStorage token.
+        nodeApi.post('/auth/logout', {}).finally(() => {
+            if (typeof window !== 'undefined') localStorage.removeItem('authToken');
+        }),
     setToken: (token: string) => { if (typeof window !== 'undefined') localStorage.setItem('authToken', token); },
 };
 
@@ -186,10 +250,15 @@ export const insurance = {
 };
 
 // ─── Payments ─────────────────────────────────────────────────────────────────
+// ⚠️  DEPRECATED: These methods return HTTP 410. Use `razorpayApi.*` instead.
 export const payments = {
+    /** @deprecated Use razorpayApi.createOrder() */
     initiate:  (data: unknown) => nodeApi.post('/payments/initiate', data),
+    /** @deprecated Use razorpayApi.verify() */
     confirm:   (data: unknown) => nodeApi.post('/payments/confirm', data),
+    /** @deprecated Use razorpayApi.refund() */
     refund:    (data: unknown) => nodeApi.post('/payments/refund', data),
+    /** @deprecated Razorpay Checkout handles card validation client-side */
     validateCard: (data: unknown) => nodeApi.post('/payments/validate-card', data),
     // Legacy Flask-proxied helpers kept for backwards compat
     createPayment: (data: unknown) => flaskApi.post('/payments/create', data),
@@ -198,10 +267,11 @@ export const payments = {
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
 export const adminApi = {
-    getDashboard: () => nodeApi.get<{ success: boolean; data: Record<string, unknown> }>('/admin/dashboard'),
-    getMachines:  () => nodeApi.get<{ success: boolean; data: unknown[] }>('/admin/machines'),
+    getDashboard:   () => nodeApi.get<{ success: boolean; data: Record<string, unknown> }>('/admin/dashboard'),
+    getMachines:    () => nodeApi.get<{ success: boolean; data: unknown[] }>('/admin/machines'),
     approveMachine: (id: string) => nodeApi.patch(`/admin/machines/${id}/approve`, {}),
-    getUsers: () => nodeApi.get<{ success: boolean; data: unknown[] }>('/admin/users'),
+    getUsers:       () => nodeApi.get<{ success: boolean; data: unknown[] }>('/admin/users'),
+    getBookings:    () => nodeApi.get<{ success: boolean; data: unknown[] }>('/admin/bookings'),
 };
 
 // ─── Notifications API ────────────────────────────────────────────────────────
@@ -254,7 +324,12 @@ export const razorpayApi = {
         request<{ success: boolean; refundId: string }>(
             typeof window !== 'undefined' ? '' : 'http://localhost:3000',
             '/api/payment/refund',
-            { method: 'POST', body: JSON.stringify({ bookingId, reason }) }
+            {
+                method: 'POST',
+                // Required by the payment API so a retried click cannot issue a second refund.
+                headers: { 'Idempotency-Key': `refund-${bookingId}` },
+                body: JSON.stringify({ bookingId, reason }),
+            }
         ),
     refundStatus: (bookingId: string) =>
         request<{ refund?: unknown }>(
@@ -266,7 +341,8 @@ export const razorpayApi = {
 
 // ─── KYC ─────────────────────────────────────────────────────────────────────
 export const kycApi = {
-    getStatus: () => nodeApi.get<{ documents: unknown[] }>('/kyc/status'),
+    getStatus: () => nodeApi.get<{ documents: Array<{ id: string; doc_type: string; status: string; rejection_reason?: string; file_url?: string; created_at: string }> }>('/kyc/status'),
+    upload: (formData: FormData) => nodeApi.uploadForm<{ success: boolean; document: unknown }>('/kyc/upload', formData),
     adminList: () => nodeApi.get<{ documents: unknown[] }>('/kyc/admin'),
     approve: (id: string) => nodeApi.patch(`/kyc/admin/${id}/approve`, {}),
     reject: (id: string, reason: string) => nodeApi.patch(`/kyc/admin/${id}/reject`, { reason }),

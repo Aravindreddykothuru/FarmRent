@@ -127,7 +127,8 @@ export function AIChat({ context = 'general', placeholder = "Ask me anything abo
                   }`}
                 >
                   <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                  <span className="text-xs opacity-70 mt-1 block">
+                  {/* A clock value: the server-rendered time can never match the browser's. */}
+                  <span className="text-xs opacity-70 mt-1 block" suppressHydrationWarning>
                     {message.timestamp.toLocaleTimeString()}
                   </span>
                 </div>

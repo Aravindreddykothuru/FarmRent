@@ -119,8 +119,8 @@ function FilterSidebar({
                             className={cn(
                                 'w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-all',
                                 category === cat.id
-                                    ? 'bg-green-700 text-white font-semibold'
-                                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                                    ? 'bg-primary text-white font-semibold shadow-sm'
+                                    : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
                             )}>
                             <span className="text-base leading-none">{cat.emoji}</span>
                             {t(cat.labelKey)}
@@ -479,7 +479,7 @@ function BrowseContent() {
 export default function BrowsePage() {
     const { t } = useLanguage();
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             {/* Page header */}
             <div className="bg-white border-b border-gray-100 shadow-sm">
                 <div className="container mx-auto px-4 lg:px-8 py-6 max-w-screen-xl">

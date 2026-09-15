@@ -156,13 +156,14 @@ function RegisterInner() {
         setEmailOtpError('');
         setEmailOtpValue('');
         try {
-            const res = await nodeApi.post<{ success: boolean; message?: string; devOtp?: string }>(
+            const res = await nodeApi.post<{ success: boolean; message?: string; devOtp?: string; devNote?: string }>(
                 '/auth/reg-email-send-otp', { email: emailVal }
             );
             setEmailStep('awaiting_otp');
             if (res?.devOtp) {
                 setEmailOtpValue(res.devOtp);
-                toast.info(`Dev OTP: ${res.devOtp}`);
+                toast.info(`Dev OTP: ${res.devOtp}`, { duration: 15000 });
+                if (res.devNote) toast.info(res.devNote, { duration: 10000 });
             } else {
                 toast.success(res?.message ?? `OTP sent to ${emailVal}`);
             }
@@ -222,7 +223,7 @@ function RegisterInner() {
     /* ── Success screen ── */
     if (registeredEmail) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA] px-4">
+            <div className="min-h-screen flex items-center justify-center bg-surface px-4">
                 <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8 max-w-md w-full text-center">
                     <MailCheck className="w-14 h-14 text-green-500 mx-auto mb-4" />
                     <h1 className="text-xl font-bold text-gray-900 mb-2">{t('auth.accountCreated')}</h1>

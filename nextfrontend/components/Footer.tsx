@@ -32,17 +32,17 @@ export default function Footer() {
     };
 
     return (
-        <footer className="bg-gray-950 text-gray-300">
+        <footer className="bg-inverse-surface text-gray-300">
             {/* ── Top CTA strip ─────────────────────────────────────────── */}
-            <div className="bg-green-700">
+            <div className="bg-primary">
                 <div className="container mx-auto px-4 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-4">
                     <div>
                         <p className="font-black text-white text-lg">{t('footer.cta')}</p>
-                        <p className="text-green-200 text-sm">{t('footer.ctaSub')}</p>
+                        <p className="text-on-primary-container text-sm">{t('footer.ctaSub')}</p>
                     </div>
                     <Link
                         href="/register"
-                        className="flex items-center gap-2 bg-white text-green-700 font-bold px-5 py-2.5 rounded-xl text-sm hover:bg-green-50 transition-colors flex-shrink-0"
+                        className="flex items-center gap-2 bg-white text-primary font-bold px-5 py-2.5 rounded-xl text-sm hover:bg-surface-container transition-colors flex-shrink-0"
                     >
                         {t('footer.getStarted')} <ArrowRight className="h-4 w-4" />
                     </Link>

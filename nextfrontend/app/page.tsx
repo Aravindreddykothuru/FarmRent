@@ -56,7 +56,7 @@ export default function HomePage() {
     const [nearby, setNearby]           = useState<EquipmentCardData[]>([]);
     const [loadingFeatured, setLF]      = useState(true);
     const [loadingNearby, setLN]        = useState(false);
-    const [stats, setStats]             = useState({ machines: 0, renters: 0, states: 0, bookings: 0 });
+    const [stats, setStats]             = useState<{ machines: number; renters: number; states: number; bookings: number } | null>(null);
 
     useEffect(() => {
         nodeApi.get<any>('/machines?status=available&sort=rating&limit=8')
@@ -64,15 +64,10 @@ export default function HomePage() {
             .catch(() => setFeatured([]))
             .finally(() => setLF(false));
 
-        nodeApi.get<any>('/admin/dashboard').then(r => {
-            const d = r?.data;
-            if (d) setStats({
-                machines: d.total_equipment ?? d.machines ?? 0,
-                renters:  d.total_users     ?? d.farmers  ?? 0,
-                states:   d.states          ?? 15,
-                bookings: d.total_bookings  ?? d.bookings ?? 0,
-            });
-        }).catch(() => {});
+        // Real platform totals; the strip stays hidden rather than showing made-up numbers if this fails.
+        nodeApi.get<{ machines: number; renters: number; states: number; bookings: number }>('/stats')
+            .then(setStats)
+            .catch(() => setStats(null));
     }, []);
 
     useEffect(() => {
@@ -82,7 +77,7 @@ export default function HomePage() {
             .then(r => setNearby(r?.data?.machines ?? r?.machines ?? r?.data ?? []))
             .catch(() => setNearby([]))
             .finally(() => setLN(false));
-    }, [geoState.status]);
+    }, [geoState]);
 
     const locLabel = geoState.status === 'resolved'
         ? (geoState.position.address?.district || geoState.position.address?.village || 'Your Area')
@@ -106,35 +101,35 @@ export default function HomePage() {
     ];
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
 
             {/* ══════════════════════════════════ HERO ══ */}
-            <section className="relative bg-gradient-to-br from-green-950 via-green-900 to-green-800 overflow-hidden">
+            <section className="relative bg-gradient-to-br from-brand-dark via-primary to-primary-container overflow-hidden">
                 <div className="absolute inset-0 opacity-[0.07] hero-pattern" />
-                <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-yellow-400/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
-                <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-green-400/10 rounded-full blur-2xl pointer-events-none" />
+                <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-secondary-container/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
+                <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-primary-fixed-dim/20 rounded-full blur-2xl pointer-events-none" />
 
                 <div className="container mx-auto px-4 lg:px-8 py-14 lg:py-24 relative z-10">
                     <div className="max-w-2xl">
                         {/* Badge */}
                         <div className="flex items-center gap-2.5 mb-6 animate-fade-in-up">
-                            <span className="bg-yellow-400 text-yellow-950 text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest">
+                            <span className="bg-secondary-container text-on-secondary-container text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest">
                                 🇮🇳 {t('home.indiaTop')}
                             </span>
-                            <span className="text-green-300 text-sm font-medium">{t('home.agriMarket')}</span>
-                            <span className="flex items-center gap-1 text-[10px] font-bold text-green-300 border border-green-700 rounded-full px-2 py-0.5">
-                                <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
+                            <span className="text-on-primary-container text-sm font-medium">{t('home.agriMarket')}</span>
+                            <span className="flex items-center gap-1 text-[10px] font-bold text-on-primary-container border border-primary-fixed-dim/40 rounded-full px-2 py-0.5">
+                                <span className="w-1.5 h-1.5 bg-primary-fixed rounded-full animate-pulse" />
                                 LIVE
                             </span>
                         </div>
 
                         <h1 className="text-4xl lg:text-5xl xl:text-6xl font-black text-white leading-[1.08] mb-5 animate-fade-in-up animation-delay-100">
                             {t('home.heroLine1')}<br />
-                            <span className="text-yellow-400">{t('home.heroLine2')}</span><br />
-                            <span className="text-green-300 text-3xl lg:text-4xl font-extrabold">{t('home.heroLine3')}</span>
+                            <span className="text-secondary-fixed">{t('home.heroLine2')}</span><br />
+                            <span className="text-primary-fixed-dim text-3xl lg:text-4xl font-extrabold">{t('home.heroLine3')}</span>
                         </h1>
 
-                        <p className="text-green-100 text-base lg:text-lg mb-8 max-w-lg leading-relaxed animate-fade-in-up animation-delay-200">
+                        <p className="text-surface-bright/90 text-base lg:text-lg mb-8 max-w-lg leading-relaxed animate-fade-in-up animation-delay-200">
                             {t('home.heroSubtitle')}
                         </p>
 
@@ -147,15 +142,15 @@ export default function HomePage() {
                             className="flex gap-2 max-w-lg animate-fade-in-up animation-delay-300"
                         >
                             <div className="relative flex-1">
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-outline" />
                                 <Input
                                     placeholder={t('home.searchPlaceholder')}
                                     value={search}
                                     onChange={e => setSearch(e.target.value)}
-                                    className="h-14 pl-12 pr-4 rounded-2xl text-base border-0 shadow-xl bg-white focus-visible:ring-2 focus-visible:ring-yellow-400"
+                                    className="h-14 pl-12 pr-4 rounded-2xl text-base border-0 shadow-xl bg-white text-on-surface focus-visible:ring-2 focus-visible:ring-primary"
                                 />
                             </div>
-                            <Button type="submit" size="lg" className="h-14 px-6 rounded-2xl bg-yellow-400 hover:bg-yellow-300 text-yellow-950 font-bold shadow-xl text-base flex-shrink-0">
+                            <Button type="submit" size="lg" className="h-14 px-6 rounded-2xl bg-primary hover:bg-primary-container text-white font-bold shadow-xl text-base flex-shrink-0">
                                 {t('home.search')}
                             </Button>
                         </form>
@@ -227,14 +222,15 @@ export default function HomePage() {
             </section>
 
             {/* ══════════════════════════════════ STATS ══ */}
+            {stats && (
             <section className="bg-white border-b border-gray-100 shadow-sm">
                 <div className="container mx-auto px-4 lg:px-8">
                     <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-gray-100">
                         {[
-                            { value: stats.machines > 0 ? `${stats.machines}+` : '500+',   label: t('home.equipmentListed'), icon: '🚜' },
-                            { value: stats.renters  > 0 ? `${stats.renters}+`  : '2,000+', label: t('home.farmerServed'),    icon: '👨‍🌾' },
-                            { value: stats.bookings > 0 ? `${stats.bookings}+` : '3,500+', label: t('home.bookingsMade'),    icon: '📋' },
-                            { value: '15+',                                                  label: t('home.statesCovered'),   icon: '📍' },
+                            { value: stats.machines.toLocaleString('en-IN'), label: t('home.equipmentListed'), icon: '🚜' },
+                            { value: stats.renters.toLocaleString('en-IN'),  label: t('home.farmerServed'),    icon: '👨‍🌾' },
+                            { value: stats.bookings.toLocaleString('en-IN'), label: t('home.bookingsMade'),    icon: '📋' },
+                            { value: stats.states.toLocaleString('en-IN'),   label: t('home.statesCovered'),   icon: '📍' },
                         ].map(s => (
                             <div key={s.label} className="py-5 px-4 text-center group">
                                 <div className="text-2xl mb-1">{s.icon}</div>
@@ -245,6 +241,7 @@ export default function HomePage() {
                     </div>
                 </div>
             </section>
+            )}
 
             <div className="container mx-auto px-4 lg:px-8 py-10 space-y-14">
 

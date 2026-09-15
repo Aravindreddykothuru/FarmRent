@@ -16,6 +16,7 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
 import { useBookingSocket } from '../hooks/useBookingSocket';
+import { MAP_COLORS } from '@/lib/mapColors';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,9 +58,9 @@ function MapInner({
     shouldRecenter: boolean;
     speed:          number;
 }) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } = require('react-leaflet');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const L = require('leaflet');
 
     // ── Custom icons ────────────────────────────────────────────────────────
@@ -73,7 +74,7 @@ function MapInner({
                 filter: drop-shadow(0 3px 6px rgba(0,0,0,0.35));
             ">
                 <div style="
-                    background: linear-gradient(135deg, #16a34a, #15803d);
+                    background: linear-gradient(135deg, ${MAP_COLORS.PIN_GREEN_START}, ${MAP_COLORS.PIN_GREEN_END});
                     border-radius: 50%; width:38px; height:38px;
                     display:flex; align-items:center; justify-content:center;
                     border: 3px solid white; font-size:18px; line-height:1;
@@ -88,7 +89,7 @@ function MapInner({
         html: `
             <div style="display:flex; flex-direction:column; align-items:center;">
                 <div style="
-                    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+                    background: linear-gradient(135deg, ${MAP_COLORS.PIN_BLUE_START}, ${MAP_COLORS.PIN_BLUE_END});
                     width:32px; height:32px; border-radius:50% 50% 50% 0;
                     transform:rotate(-45deg); border:3px solid white;
                     box-shadow:0 3px 8px rgba(59,130,246,0.5);
@@ -103,7 +104,7 @@ function MapInner({
         html: `
             <div style="display:flex; flex-direction:column; align-items:center;">
                 <div style="
-                    background: linear-gradient(135deg, #f59e0b, #d97706);
+                    background: linear-gradient(135deg, ${MAP_COLORS.PIN_AMBER_START}, ${MAP_COLORS.PIN_AMBER_END});
                     width:32px; height:32px; border-radius:50% 50% 50% 0;
                     transform:rotate(-45deg); border:3px solid white;
                     box-shadow:0 3px 8px rgba(245,158,11,0.5);
@@ -157,7 +158,7 @@ function MapInner({
             {routeCoords.length > 1 && (
                 <Polyline
                     positions={routeCoords}
-                    color="#16a34a" weight={5} opacity={0.8}
+                    color={MAP_COLORS.ROUTE_LINE} weight={5} opacity={0.8}
                     dashArray={liveRoute ? undefined : '10,6'}
                 />
             )}
@@ -166,7 +167,7 @@ function MapInner({
             {positions.length > 2 && (
                 <Polyline
                     positions={positions.slice(-80)}
-                    color="#6b7280" weight={2} opacity={0.35}
+                    color={MAP_COLORS.BREADCRUMB_LINE} weight={2} opacity={0.35}
                 />
             )}
 
@@ -176,7 +177,7 @@ function MapInner({
                     <div style={{ textAlign: 'center', minWidth: 120 }}>
                         <div style={{ fontSize: 24 }}>🚜</div>
                         <div style={{ fontWeight: 600 }}>Driver Location</div>
-                        {speed > 0 && <div style={{ color: '#6b7280', fontSize: 12 }}>{speed.toFixed(1)} km/h</div>}
+                        {speed > 0 && <div className="text-slate-500 text-xs">{speed.toFixed(1)} km/h</div>}
                     </div>
                 </Popup>
             </Marker>
@@ -257,30 +258,29 @@ export default function TrackingMap({
 
     // Signal quality badge color
     const signalColor = connectionState === 'connected'
-        ? location ? '#16a34a' : '#f59e0b'
-        : '#ef4444';
+        ? location ? MAP_COLORS.SIGNAL_LIVE : MAP_COLORS.SIGNAL_WAITING
+        : MAP_COLORS.SIGNAL_DISCONNECTED;
     const signalLabel = connectionState === 'connected'
         ? location ? 'Live' : 'Waiting for GPS…'
         : connectionState === 'reconnecting' ? 'Reconnecting…' : 'Disconnected';
 
     return (
-        <div style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column', borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+        <div className="h-full w-full flex flex-col rounded-xl overflow-hidden border border-gray-200">
 
             {/* Status bar */}
-            <div style={{
-                display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px',
-                background: 'white', borderBottom: '1px solid #e5e7eb', fontSize: 13,
-            }}>
-                <span style={{
-                    width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-                    background: signalColor,
-                    boxShadow: isConnected && location ? `0 0 0 3px ${signalColor}33` : 'none',
-                    animation: isConnected && location ? 'pulse 2s infinite' : 'none',
-                }} />
-                <span style={{ fontWeight: 500, color: signalColor }}>{signalLabel}</span>
+            <div className="flex items-center gap-2.5 px-3 py-1.5 bg-white border-b border-gray-200 text-xs">
+                <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{
+                        background: signalColor,
+                        boxShadow: isConnected && location ? `0 0 0 3px ${signalColor}33` : 'none',
+                        animation: isConnected && location ? 'pulse 2s infinite' : 'none',
+                    }}
+                />
+                <span className="font-semibold" style={{ color: signalColor }}>{signalLabel}</span>
 
                 {location && (
-                    <span style={{ marginLeft: 'auto', color: '#9ca3af', fontSize: 11 }}>
+                    <span className="ml-auto text-slate-400 text-[11px]">
                         {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
                         {speed > 0 && ` · ${speed.toFixed(1)} km/h`}
                         {location.accuracy && ` · ±${location.accuracy.toFixed(0)}m`}
@@ -291,20 +291,18 @@ export default function TrackingMap({
                 <button
                     onClick={() => setRecenter(r => !r)}
                     title={shouldRecenter ? 'Auto-pan ON' : 'Auto-pan OFF'}
-                    style={{
-                        marginLeft: 8, padding: '2px 8px', borderRadius: 6, fontSize: 11,
-                        border: '1px solid #e5e7eb', cursor: 'pointer',
-                        background: shouldRecenter ? '#dcfce7' : '#f3f4f6',
-                        color:      shouldRecenter ? '#16a34a' : '#6b7280',
-                        fontWeight: 500,
-                    }}
+                    className={`ml-2 px-2 py-0.5 rounded text-[11px] font-medium border border-gray-200 cursor-pointer transition-colors ${
+                        shouldRecenter 
+                            ? 'bg-green-50 text-green-600 hover:bg-green-100' 
+                            : 'bg-gray-100 text-slate-500 hover:bg-gray-200'
+                    }`}
                 >
                     {shouldRecenter ? '📍 Auto' : '📍 Fixed'}
                 </button>
             </div>
 
             {/* Map */}
-            <div style={{ flex: 1, minHeight: 0 }}>
+            <div className="flex-1 min-h-0">
                 <DynamicMap
                     position={position}
                     positions={positions}

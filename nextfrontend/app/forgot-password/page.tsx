@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { nodeApi } from '@/lib/api';
 import { useLanguage } from '@/context/LanguageContext';
+import { toast } from 'sonner';
 
 type Mode  = 'email' | 'phone';
 type Stage = 'form' | 'sent';
@@ -60,7 +61,19 @@ export default function ForgotPasswordPage() {
             const body = isEmail
                 ? { email: email.trim().toLowerCase() }
                 : { phone };
-            await nodeApi.post('/auth/forgot-password', body);
+            const res = await nodeApi.post<{
+                success?: boolean;
+                message?: string;
+                devResetLink?: string;
+                emailDelivered?: boolean;
+                devNote?: string;
+            }>('/auth/forgot-password', body);
+            if (res?.devResetLink) {
+                toast.info(`Dev reset link: ${res.devResetLink}`, { duration: 20000 });
+                if (res.devNote) toast.info(res.devNote, { duration: 12000 });
+            } else if (res?.emailDelivered === false) {
+                toast.warning('Email could not be delivered. Check server logs and SMTP/Brevo settings.');
+            }
             setStage('sent');
         } catch (err: unknown) {
             if (!isEmail && err instanceof Error && err.message.includes('No account')) {
@@ -81,7 +94,7 @@ export default function ForgotPasswordPage() {
     const canSubmit  = isEmail ? email.trim().length > 0 : phone.length > 0;
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA] px-4 py-10">
+        <div className="min-h-screen flex items-center justify-center bg-surface px-4 py-10">
             <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8 max-w-md w-full">
 
                 <Link

@@ -40,7 +40,7 @@ interface BookingInfo {
   id:           string;
   status:       string;
   equipment_id: string;
-  farmer_id:    string;
+  renter_id:    string; // equipment_rentals uses renter_id (not farmer_id)
   owner_id:     string;
   equipment?:   Equipment;
   owner?:       { name: string };
@@ -76,9 +76,9 @@ export default function LiveTrackingPage() {
     try {
       if (supabase) {
         const { data, error } = await supabase
-          .from('bookings')
+          .from('equipment_rentals')
           .select(`
-            id, status, equipment_id, farmer_id, owner_id,
+            id, status, equipment_id, renter_id, owner_id,
             equipment:equipment_id ( name, images, pickup_lat, pickup_lng, pickup_address ),
             owner:owner_id ( name )
           `)
@@ -104,7 +104,9 @@ export default function LiveTrackingPage() {
   useEffect(() => { fetchBooking(); }, [fetchBooking]);
 
   // ── Derived flags ─────────────────────────────────────────────────────────
-  const isActive = ['confirmed', 'in_progress', 'active'].includes(booking?.status ?? '');
+  // equipment_rentals uses: requested | approved | active | completed | cancelled | disputed
+  // (old bookings used: pending | confirmed | in_progress)
+  const isActive = ['confirmed', 'approved', 'in_progress', 'active'].includes(booking?.status ?? '');
   const isOwner  = userRole === 'owner' && userId === booking?.owner_id;
 
   // ── Real-time tracking hook ───────────────────────────────────────────────

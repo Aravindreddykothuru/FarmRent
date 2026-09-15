@@ -21,14 +21,18 @@ import WeatherWidget from '@/components/WeatherWidget';
 
 const FALLBACK = 'https://images.unsplash.com/photo-1560493676-04071c5f467b?w=200&q=60';
 
+// Statuses returned by /api/v1/bookings (see booking-service/lifecycle.js)
 const STATUS_STYLES: Record<string, { dot: string; text: string }> = {
-    requested:   { dot: 'bg-blue-400',   text: 'text-blue-700 bg-blue-50' },
-    pending:     { dot: 'bg-amber-400',  text: 'text-amber-700 bg-amber-50' },
-    accepted:    { dot: 'bg-indigo-400', text: 'text-indigo-700 bg-indigo-50' },
-    in_progress: { dot: 'bg-green-500',  text: 'text-green-700 bg-green-50' },
-    completed:   { dot: 'bg-gray-400',   text: 'text-gray-600 bg-gray-100' },
-    cancelled:   { dot: 'bg-red-400',    text: 'text-red-600 bg-red-50' },
+    pending:        { dot: 'bg-amber-400',  text: 'text-amber-700 bg-amber-50' },
+    confirmed:      { dot: 'bg-indigo-400', text: 'text-indigo-700 bg-indigo-50' },
+    in_progress:    { dot: 'bg-green-500',  text: 'text-green-700 bg-green-50' },
+    return_pending: { dot: 'bg-blue-400',   text: 'text-blue-700 bg-blue-50' },
+    completed:      { dot: 'bg-gray-400',   text: 'text-gray-600 bg-gray-100' },
+    cancelled:      { dot: 'bg-red-400',    text: 'text-red-600 bg-red-50' },
+    rejected:       { dot: 'bg-red-400',    text: 'text-red-600 bg-red-50' },
 };
+const ACTIVE_STATUSES = ['pending', 'confirmed', 'in_progress', 'return_pending'];
+const HISTORY_STATUSES = ['completed', 'cancelled', 'rejected'];
 
 interface Booking {
     id?: string; _id?: string;
@@ -48,12 +52,13 @@ function LiveStatusBadge({ bookingId, initialStatus }: { bookingId: string; init
     const s   = live?.status || initialStatus;
     const cfg = STATUS_STYLES[s] ?? STATUS_STYLES.pending;
     const STATUS_LABELS: Record<string, string> = {
-        requested:   t('dashboard.statusRequested'),
+        return_pending: 'Return Pending',
         pending:     t('dashboard.statusPending'),
-        accepted:    t('dashboard.statusAccepted'),
+        confirmed:   t('dashboard.statusAccepted'),
         in_progress: t('dashboard.statusInProgress'),
         completed:   t('dashboard.statusCompleted'),
         cancelled:   t('dashboard.statusCancelled'),
+        rejected:    'Declined',
     };
     return (
         <span className={cn('inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full', cfg.text)}>
@@ -77,11 +82,11 @@ function BookingCard({ b }: { b: Booking }) {
     const start   = b.start_date ?? b.startDate ?? '';
     const end     = b.end_date ?? b.endDate ?? '';
     const amt     = b.total_amount ?? b.totalAmount ?? 0;
-    const isTrackable = ['requested','accepted','in_progress'].includes(b.status);
+    const isTrackable = ['confirmed', 'in_progress', 'return_pending'].includes(b.status);
     const loc = b.equipment?.location?.district;
 
     return (
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden">
+        <div className="stitch-card overflow-hidden">
             <div className="flex gap-0">
                 {/* Image strip */}
                 <div className="w-24 flex-shrink-0 overflow-hidden bg-gray-100">
@@ -184,11 +189,11 @@ export default function FarmerDashboard() {
             })
             .catch(() => toast.error(t('booking.loadError')))
             .finally(() => setLoading(false));
-    }, []);
+    }, [t]);
 
     const getId  = (b: Booking) => b.id ?? b._id ?? '';
-    const active  = bookings.filter(b => ['requested','pending','accepted','in_progress'].includes(b.status));
-    const history = bookings.filter(b => ['completed','cancelled'].includes(b.status));
+    const active  = bookings.filter(b => ACTIVE_STATUSES.includes(b.status));
+    const history = bookings.filter(b => HISTORY_STATUSES.includes(b.status));
     const completed = history.filter(b => b.status === 'completed');
 
     const quickActions = [
@@ -199,7 +204,7 @@ export default function FarmerDashboard() {
     ];
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             {/* Hero header */}
             <div className="bg-gradient-to-br from-green-700 to-green-900 text-white px-4 lg:px-8 py-8">
                 <div className="container mx-auto max-w-screen-xl">

@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
     Calendar, IndianRupee, Package, ChevronRight,
@@ -29,21 +28,22 @@ interface Booking {
 
 type Tab = 'active' | 'upcoming' | 'past' | 'cancelled';
 
+// Statuses returned by /api/v1/bookings (see Backend_Node_legacy/services/booking-service/lifecycle.js)
 const TAB_STATUSES: Record<Tab, string[]> = {
-    active:    ['in_progress', 'requested'],
-    upcoming:  ['pending', 'confirmed', 'accepted'],
+    active:    ['in_progress', 'return_pending'],
+    upcoming:  ['pending', 'confirmed'],
     past:      ['completed'],
-    cancelled: ['cancelled'],
+    cancelled: ['cancelled', 'rejected'],
 };
 
 const STATUS_STYLE: Record<string, { dot: string; badge: string; label: string }> = {
-    requested:   { dot: 'bg-blue-400',   badge: 'bg-blue-50 text-blue-700',   label: 'Requested' },
-    pending:     { dot: 'bg-amber-400',  badge: 'bg-amber-50 text-amber-700', label: 'Pending Approval' },
-    accepted:    { dot: 'bg-indigo-400', badge: 'bg-indigo-50 text-indigo-700', label: 'Accepted' },
-    confirmed:   { dot: 'bg-green-500',  badge: 'bg-green-50 text-green-700', label: 'Confirmed' },
-    in_progress: { dot: 'bg-blue-500',   badge: 'bg-blue-50 text-blue-700',   label: 'In Progress' },
-    completed:   { dot: 'bg-gray-400',   badge: 'bg-gray-50 text-gray-600',   label: 'Completed' },
-    cancelled:   { dot: 'bg-red-400',    badge: 'bg-red-50 text-red-600',     label: 'Cancelled' },
+    pending:        { dot: 'bg-amber-400',  badge: 'bg-amber-50 text-amber-700',   label: 'Pending Approval' },
+    confirmed:      { dot: 'bg-green-500',  badge: 'bg-green-50 text-green-700',   label: 'Confirmed' },
+    in_progress:    { dot: 'bg-blue-500',   badge: 'bg-blue-50 text-blue-700',     label: 'In Progress' },
+    return_pending: { dot: 'bg-indigo-400', badge: 'bg-indigo-50 text-indigo-700', label: 'Return Pending' },
+    completed:      { dot: 'bg-gray-400',   badge: 'bg-gray-50 text-gray-600',     label: 'Completed' },
+    cancelled:      { dot: 'bg-red-400',    badge: 'bg-red-50 text-red-600',       label: 'Cancelled' },
+    rejected:       { dot: 'bg-red-400',    badge: 'bg-red-50 text-red-600',       label: 'Declined' },
 };
 
 const FALLBACK = 'https://images.unsplash.com/photo-1560493676-04071c5f467b?w=200&q=60';
@@ -61,10 +61,9 @@ function BookingCard({ booking, onCancel, onRepeat }: {
     const name   = booking.equipment?.name ?? 'Equipment';
     const img    = booking.equipment?.images?.[0] ?? FALLBACK;
     const cfg    = STATUS_STYLE[booking.status] ?? STATUS_STYLE.pending;
-    const isActive    = ['in_progress', 'requested'].includes(booking.status);
-    const isUpcoming  = ['pending', 'confirmed', 'accepted'].includes(booking.status);
+    const isActive    = TAB_STATUSES.active.includes(booking.status);
+    const isUpcoming  = TAB_STATUSES.upcoming.includes(booking.status);
     const isCompleted = booking.status === 'completed';
-    const isCancelled = booking.status === 'cancelled';
 
     return (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
@@ -159,7 +158,7 @@ export default function BookingsPage() {
             .then(r => setBookings(r?.bookings ?? []))
             .catch(() => toast.error(t('booking.loadError')))
             .finally(() => setLoading(false));
-    }, []);
+    }, [t]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -196,7 +195,7 @@ export default function BookingsPage() {
     const filtered = bookings.filter(b => TAB_STATUSES[tab].includes(b.status));
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
 
             {/* Header */}
             <div className="bg-white border-b sticky top-0 z-10">

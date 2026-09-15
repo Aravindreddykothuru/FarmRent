@@ -182,18 +182,18 @@ function LanguageCard({
 }
 
 // ── Navbar dropdown ───────────────────────────────────────────────────────────
+import { useClickOutside } from '@/hooks/useClickOutside';
+
 export default function LanguageSwitcher() {
     const { lang, setLang, markChosen, currentLanguage } = useLanguage();
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        const h = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-        };
-        document.addEventListener('mousedown', h);
-        return () => document.removeEventListener('mousedown', h);
-    }, []);
+    useClickOutside({
+        refs: [ref],
+        handler: () => setOpen(false),
+        enabled: open,
+    });
 
     const pick = (code: LangCode) => {
         setLang(code);

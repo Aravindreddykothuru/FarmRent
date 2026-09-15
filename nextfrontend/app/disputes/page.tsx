@@ -12,8 +12,7 @@ import { nodeApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 
-const DISPUTE_TYPE_VALUES = ['equipment_damage', 'non_return', 'payment_dispute', 'service_issue', 'other'] as const;
-type DisputeType = typeof DISPUTE_TYPE_VALUES[number];
+type DisputeType = 'equipment_damage' | 'non_return' | 'payment_dispute' | 'service_issue' | 'other';
 
 const STATUS_COLORS: Record<string, { color: string; bg: string }> = {
     open:               { color: 'text-yellow-700', bg: 'bg-yellow-50 border-yellow-200' },
@@ -116,7 +115,7 @@ export default function DisputesPage() {
 
     if (authLoading || loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA]">
+            <div className="min-h-screen flex items-center justify-center bg-surface">
                 <Loader2 className="w-8 h-8 text-green-600 animate-spin" />
             </div>
         );
@@ -124,7 +123,7 @@ export default function DisputesPage() {
 
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             <div className="max-w-3xl mx-auto px-4 py-10">
 
                 {/* Header */}
