@@ -186,7 +186,6 @@ function ProfileDropdown({ user, onLogout }: { user: any; onLogout: () => void }
 
 export default function Navbar() {
     const pathname = usePathname();
-    const router = useRouter();
     const { user, logout, isAuthenticated } = useAuth();
     const { t } = useLanguage();
     const [mobileOpen, setMobileOpen] = useState(false);
@@ -194,8 +193,11 @@ export default function Navbar() {
 
     const handleLogout = async () => {
         await logout();
-        router.push('/login');
         setMobileOpen(false);
+        // A full page load, not router.push: the client router may replay a /login prefetch made while signed in
+        // (which the proxy answered with a redirect back to the dashboard), and a reload also drops the previous
+        // user's cached pages and in-memory data — important on shared phones.
+        window.location.assign('/login');
     };
 
     const isActive = (href: string) => pathname.startsWith(href);
