@@ -1,90 +1,104 @@
-version: '3.9'
+# FarmRent — full local stack.
+#
+#   node scripts/setup-local-env.js        # once: generates .env + Backend_Node_legacy/.env
+#   docker compose up -d db rest gateway redis
+#   npm run migrate && npm run seed         # schema + demo data
+#   npm run dev                             # app on http://localhost:3000
+#
+# Or run everything (including the app image) in containers:
+#   docker compose --profile app up --build
+#
+# db + rest + gateway emulate the parts of Supabase the backend uses
+# (Postgres + PostgREST behind /rest/v1), so no hosted project is needed locally.
+
+name: farmrent
 
 services:
-  # ─── Database (PostgreSQL + PostGIS) ────────────────────────────────────────
   db:
-    image: postgis/postgis:15-3.3
-    restart: always
+    image: postgis/postgis:15-3.4-alpine
     environment:
-      POSTGRES_USER: farmrent_admin
-      POSTGRES_PASSWORD: farmrent_password
-      POSTGRES_DB: farmrent_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing - run node scripts/setup-local-env.js}
+      POSTGRES_DB: farmrent
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-55432}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/data
+      - ./infra/local/db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U farmrent_admin -d farmrent_db" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d farmrent"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
-  # ─── Database UI (pgAdmin) ──────────────────────────────────────────────────
-  pgadmin:
-    image: dpage/pgadmin4
-    restart: always
+  rest:
+    image: postgrest/postgrest:v12.2.3
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@farmrent.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "5050:80"
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/farmrent
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:?SUPABASE_JWT_SECRET missing - run node scripts/setup-local-env.js}
+      PGRST_DB_CHANNEL_ENABLED: "true"
     depends_on:
       db:
         condition: service_healthy
 
-  # ─── Redis ──────────────────────────────────────────────────────────────────
+  gateway:
+    image: nginx:alpine
+    ports:
+      - "${SUPABASE_GATEWAY_PORT:-54321}:80"
+    volumes:
+      - ./infra/local/gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - rest
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   redis:
     image: redis:7-alpine
-    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6380}:6379"
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
-  # ─── Node.js Backend ────────────────────────────────────────────────────────
-  backend:
-    build:
-      context: ./Backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - "5000:5000"
-    env_file: ./Backend/.env
+  migrate:
+    profiles: ["app"]
+    build: .
+    command: ["node", "Backend_Node_legacy/db/migrate.js"]
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/farmrent
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    profiles: ["app"]
+    build: .
     environment:
       NODE_ENV: production
+      PORT: "3000"
+      APP_URL: http://localhost:${APP_PORT:-3000}
+      ALLOWED_ORIGINS: http://localhost:${APP_PORT:-3000}
+      SUPABASE_URL: http://gateway
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:?SUPABASE_SERVICE_KEY missing - run node scripts/setup-local-env.js}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET missing - run node scripts/setup-local-env.js}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET missing - run node scripts/setup-local-env.js}
       REDIS_URL: redis://redis:6379
-      FLASK_URL: http://flask:5001
+    ports:
+      - "${APP_PORT:-3000}:3000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+      gateway:
+        condition: service_healthy
       redis:
         condition: service_healthy
-      flask:
-        condition: service_healthy
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
-  # ─── Flask Micro-service ────────────────────────────────────────────────────
-  flask:
-    build:
-      context: ./FutureEnhancement
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - "5001:5001"
-    env_file: ./FutureEnhancement/.env
-    environment:
-      FLASK_ENV: production
-      FLASK_PORT: "5001"
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:5001/api/health" ]
-      interval: 15s
-      timeout: 5s
-      retries: 5
 
 volumes:
-  pgdata:
+  db_data:
