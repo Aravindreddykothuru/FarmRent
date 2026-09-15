@@ -1,6 +1,0 @@
-node_modules
-uploads/
-logs/
-*.log
-.env
-.env.*
