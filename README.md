@@ -129,6 +129,7 @@ In development, registration and login OTPs are returned in the API response (`d
 | `npm run test:e2e` | the full rental journey over HTTP: register, list, search, quote, request, overlap refusal, confirm, hand over, return, complete, history, logout, admin | app running in development mode on :3000, seeded |
 | `npm run test:ui` | every page in Chrome as visitor, renter, owner and admin (console errors, failed requests, redirects), the rental journey through the UI, phone-width layout, sign-out | app running on :3000, seeded, Chrome or Edge installed |
 | `npm run lint` / `npm run typecheck` | ESLint for both apps, TypeScript for the web app | — |
+| `npm --prefix nextfrontend run check:links` | every hard-coded internal link points at a page that exists (production prefetches links, so a dead one is a console 404) | — |
 
 The integration tests refuse to run against a non-local database.
 
