@@ -39,6 +39,7 @@ const REVEAL_CONTACT_STATUSES = new Set(['approved', 'active', 'return_pending',
 const AVAILABILITY_TTL_SEC = 600;
 
 const completionLimiter = createRateLimiter({
+    name: 'booking-completion',
     windowMs: 15 * 60 * 1000,
     max: 10,
     message: 'Too many completion attempts. Please wait before trying again.',

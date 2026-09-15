@@ -155,6 +155,17 @@ describe('authentication', () => {
         expect(statuses[20]).toBe(429);
     });
 
+    test('each rate limiter counts a sign-in once, so ordinary repeated sign-ins are not throttled', async () => {
+        // /login sits behind two limiters (auth router + login route). Sharing one counter made every attempt
+        // count twice, so the 11th sign-in from an IP was refused even though no limit had been reached.
+        const user = await createUser('farmer');
+        const statuses = [];
+        for (let i = 0; i < 15; i += 1) {
+            statuses.push((await request(getApp()).post('/api/v1/auth/login').send({ email: user.email, password: PASSWORD })).status);
+        }
+        expect(statuses).toEqual(Array(15).fill(200));
+    });
+
     test('non-admins cannot reach admin endpoints', async () => {
         const agent = await login(await createUser('owner'));
         const res = await agent.get('/api/v1/admin/users').expect(403);
