@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "baseUrl": "../nextfrontend",
+    "paths": {
+      "react": ["node_modules/react"],
+      "react/*": ["node_modules/react/*"],
+      "@supabase/auth-helpers-nextjs": ["node_modules/@supabase/auth-helpers-nextjs"],
+      "socket.io-client": ["node_modules/socket.io-client"]
+    },
+    "typeRoots": ["../nextfrontend/node_modules/@types"]
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}

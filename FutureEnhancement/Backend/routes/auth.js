@@ -18,4 +18,8 @@ router.get('/me', protect, authController.getMe);
 // ─── PATCH /api/v1/auth/profile ───────────────────────────────────────────────
 router.patch('/profile', protect, validate(authValidation.updateProfile), authController.updateProfile);
 
+// Mount secure forgot/reset routes
+const secureAuthRoutes = require('./authRoutes');
+router.use('/', secureAuthRoutes);
+
 module.exports = router;

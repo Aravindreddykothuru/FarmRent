@@ -16,7 +16,7 @@ const router = require('express').Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { protect } = require('../middleware/auth');
+const { protect } = require('../middleware/authMiddleware');
 const { sendSuccess, createError } = require('../utils/helpers');
 
 // ── Multer disk storage (local fallback) ──

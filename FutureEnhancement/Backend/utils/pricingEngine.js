@@ -1,6 +1,6 @@
 'use strict';
 
-const Booking = require('../models/Booking');
+const EquipmentRental = require('../models/EquipmentRental');
 const logger = require('./logger');
 
 /**
@@ -11,7 +11,7 @@ class PricingEngine {
     /**
      * Main pricing calculation
      */
-    static async calculate(machine, bookingParams) {
+    static async calculate(equipment, bookingParams) {
         const {
             startDate,
             endDate,
@@ -31,28 +31,28 @@ class PricingEngine {
         const totalHours = this._calculateHours(startTime, endTime, totalDays);
 
         // Base charge calculation
-        const baseCharge = this._calculateBaseCharge(machine.pricing, totalHours, totalDays);
+        const baseCharge = this._calculateBaseCharge(equipment.pricing, totalHours, totalDays);
 
         // Seasonal multiplier
         const seasonalMultiplier = this._getSeasonalMultiplier(start, end);
 
         // Demand multiplier (based on current booking density)
-        const demandMultiplier = await this._getDemandMultiplier(machine._id, start, end);
+        const demandMultiplier = await this._getDemandMultiplier(equipment._id, start, end);
 
         // Additional charges
         const operatorCharge = needsOperator
-            ? (machine.pricing.operatorChargePerDay || 0) * totalDays
+            ? (equipment.pricing.operatorChargePerDay || 0) * totalDays
             : 0;
 
         const fuelCharge = needsFuel
-            ? this._estimateFuelCharge(machine, totalHours)
+            ? this._estimateFuelCharge(equipment, totalHours)
             : 0;
 
         const transportCharge = needsTransport
-            ? (machine.pricing.transportChargePerKm || 0) * distanceKm
+            ? (equipment.pricing.transportChargePerKm || 0) * distanceKm
             : 0;
 
-        const securityDeposit = machine.pricing.securityDeposit || 0;
+        const securityDeposit = equipment.pricing.securityDeposit || 0;
 
         // Tax (18% GST)
         const subtotal =
@@ -82,8 +82,8 @@ class PricingEngine {
                 totalAmount,
                 finalAmount,
                 pricingSnapshot: {
-                    baseRatePerHour: machine.pricing.baseRatePerHour,
-                    baseRatePerDay: machine.pricing.baseRatePerDay,
+                    baseRatePerHour: equipment.pricing.baseRatePerHour,
+                    dailyRate: equipment.pricing.dailyRate,
                     calculatedAt: new Date(),
                 },
             },
@@ -99,7 +99,7 @@ class PricingEngine {
 
     static _calculateBaseCharge(pricing, totalHours, totalDays) {
         const hourlyTotal = totalHours * pricing.baseRatePerHour;
-        const dailyTotal = totalDays * pricing.baseRatePerDay;
+        const dailyTotal = totalDays * pricing.dailyRate;
         const avgHoursPerDay = totalHours / totalDays;
         return avgHoursPerDay >= 8
             ? Math.min(hourlyTotal, dailyTotal)
@@ -113,12 +113,12 @@ class PricingEngine {
         return parseFloat(process.env.OFF_SEASON_MULTIPLIER) || 0.8;
     }
 
-    static async _getDemandMultiplier(machineId) {
+    static async _getDemandMultiplier(equipmentId) {
         try {
-            const recentBookings = await Booking.countDocuments({
-                machine: machineId,
+            const recentBookings = await EquipmentRental.countDocuments({
+                equipment: equipmentId,
                 startDate: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-                status: { $in: ['confirmed', 'active', 'completed'] },
+                status: { $in: ['approved', 'active', 'completed'] },
             });
             if (recentBookings >= 15) return 1.3;
             if (recentBookings >= 8) return 1.15;
@@ -130,14 +130,14 @@ class PricingEngine {
         }
     }
 
-    static _estimateFuelCharge(machine, totalHours) {
+    static _estimateFuelCharge(equipment, totalHours) {
         const fuelConsumptionPerHour = {
             tractor: 4, harvester: 8, plough: 3, seeder: 2,
             irrigation_pump: 1.5, thresher: 3, cultivator: 3,
             rotavator: 3, sprayer: 1, other: 3,
         };
         const fuelPricePerLitre = 95;
-        const consumption = fuelConsumptionPerHour[machine.type] || 3;
+        const consumption = fuelConsumptionPerHour[equipment.category] || 3;
         return consumption * totalHours * fuelPricePerLitre;
     }
 

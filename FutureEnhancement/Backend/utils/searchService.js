@@ -11,7 +11,7 @@ const logger = require('./logger');
 class SearchService {
     static async searchMachines(params) {
         const {
-            q, type, district, state,
+            q, type, category, district, state,
             minPrice, maxPrice, minRating,
             needsOperator, lat, lng, radius = 50,
             page = 1, limit = 20, sort = 'relevance', cursor,
@@ -24,15 +24,16 @@ class SearchService {
         const startTime = Date.now();
         const pipeline = [];
 
-        const matchStage = { isActive: true, isApproved: true, status: { $in: ['available'] } };
+        const matchStage = { isActive: true, isVerified: true, status: { $in: ['available'] } };
 
-        if (type) matchStage.type = Array.isArray(type) ? { $in: type } : type;
+        const targetCategory = category || type;
+        if (targetCategory) matchStage.category = Array.isArray(targetCategory) ? { $in: targetCategory } : targetCategory;
         if (state) matchStage['location.state'] = new RegExp(state, 'i');
         if (district) matchStage['location.district'] = new RegExp(district, 'i');
         if (minPrice || maxPrice) {
-            matchStage['pricing.baseRatePerDay'] = {};
-            if (minPrice) matchStage['pricing.baseRatePerDay'].$gte = parseFloat(minPrice);
-            if (maxPrice) matchStage['pricing.baseRatePerDay'].$lte = parseFloat(maxPrice);
+            matchStage['pricing.dailyRate'] = {};
+            if (minPrice) matchStage['pricing.dailyRate'].$gte = parseFloat(minPrice);
+            if (maxPrice) matchStage['pricing.dailyRate'].$lte = parseFloat(maxPrice);
         }
         if (minRating) matchStage['ratings.average'] = { $gte: parseFloat(minRating) };
         if (needsOperator === 'true') matchStage['pricing.operatorIncluded'] = true;
@@ -51,8 +52,8 @@ class SearchService {
 
         const sortMap = {
             relevance: q ? { textScore: -1, 'ratings.average': -1 } : { 'ratings.average': -1 },
-            price_asc: { 'pricing.baseRatePerDay': 1 },
-            price_desc: { 'pricing.baseRatePerDay': -1 },
+            price_asc: { 'pricing.dailyRate': 1 },
+            price_desc: { 'pricing.dailyRate': -1 },
             rating: { 'ratings.average': -1, 'ratings.count': -1 },
             nearest: lat ? { distanceKm: 1 } : { createdAt: -1 },
             popular: { totalBookings: -1 },
@@ -71,9 +72,9 @@ class SearchService {
                     { $limit: parseInt(limit) },
                     {
                         $project: {
-                            name: 1, type: 1, model: 1, manufacturer: 1,
+                            name: 1, category: 1, model: 1, manufacturer: 1,
                             'location.district': 1, 'location.state': 1, 'location.village': 1,
-                            'pricing.baseRatePerHour': 1, 'pricing.baseRatePerDay': 1,
+                            'pricing.baseRatePerHour': 1, 'pricing.dailyRate': 1,
                             'pricing.operatorIncluded': 1, 'pricing.securityDeposit': 1,
                             'specifications.horsepower': 1, 'specifications.fuelType': 1,
                             'ratings.average': 1, 'ratings.count': 1,
@@ -87,7 +88,7 @@ class SearchService {
                             let: { ownerId: '$owner' },
                             pipeline: [
                                 { $match: { $expr: { $eq: ['$_id', '$$ownerId'] } } },
-                                { $project: { name: 1, 'ownerDetails.businessName': 1, 'address.district': 1 } },
+                                { $project: { fullName: 1, 'ownerDetails.businessName': 1, 'address.district': 1 } },
                             ],
                             as: 'owner',
                         },
@@ -95,23 +96,43 @@ class SearchService {
                     { $unwind: { path: '$owner', preserveNullAndEmptyArrays: true } },
 
                 ],
-                priceRange: [{ $group: { _id: null, min: { $min: '$pricing.baseRatePerDay' }, max: { $max: '$pricing.baseRatePerDay' } } }],
-                byType: [{ $group: { _id: '$type', count: { $sum: 1 } } }, { $sort: { count: -1 } }],
+                priceRange: [{ $group: { _id: null, min: { $min: '$pricing.dailyRate' }, max: { $max: '$pricing.dailyRate' } } }],
+                byType: [{ $group: { _id: '$category', count: { $sum: 1 } } }, { $sort: { count: -1 } }],
                 byDistrict: [{ $group: { _id: '$location.district', count: { $sum: 1 } } }, { $sort: { count: -1 } }, { $limit: 10 }],
             },
         });
 
-        const Machine = mongoose.model('Machine');
-        const [result] = await Machine.aggregate(pipeline).allowDiskUse(false);
+        const Equipment = mongoose.model('Equipment');
+        const [result] = await Equipment.aggregate(pipeline).allowDiskUse(false);
         const queryTime = Date.now() - startTime;
         if (queryTime > 1500) logger.warn(`Slow search query: ${queryTime}ms`);
 
+        const mappedData = (result.data || []).map(item => {
+            const mapped = { ...item };
+            mapped.type = item.category;
+            if (item.pricing) {
+                mapped.pricing = {
+                    ...item.pricing,
+                    baseRatePerDay: item.pricing.dailyRate
+                };
+            }
+            if (item.owner) {
+                mapped.owner = {
+                    ...item.owner,
+                    name: item.owner.fullName
+                };
+            }
+            return mapped;
+        });
+
+        const priceRangeResult = result.priceRange[0] || { min: 0, max: 0 };
+
         const response = {
-            results: result.data,
+            results: mappedData,
             metadata: result.metadata[0] || { total: 0, page: parseInt(page), limit: parseInt(limit), totalPages: 0 },
-            facets: { priceRange: result.priceRange[0] || { min: 0, max: 0 }, byType: result.byType, byDistrict: result.byDistrict },
+            facets: { priceRange: { min: priceRangeResult.min || 0, max: priceRangeResult.max || 0 }, byType: result.byType, byDistrict: result.byDistrict },
             queryTime: `${queryTime}ms`,
-            nextCursor: result.data.length === parseInt(limit) ? result.data[result.data.length - 1]?._id : null,
+            nextCursor: mappedData.length === parseInt(limit) ? mappedData[mappedData.length - 1]?._id : null,
         };
 
         await cache.set(cacheKey, response, cache.searchTTL);
@@ -124,21 +145,27 @@ class SearchService {
         const cached = await cache.get(cacheKey);
         if (cached) return cached;
 
-        const Machine = mongoose.model('Machine');
-        const suggestions = await Machine.find(
+        const Equipment = mongoose.model('Equipment');
+        const suggestions = await Equipment.find(
             {
                 $or: [
                     { name: { $regex: `^${q}`, $options: 'i' } },
-                    { type: { $regex: `^${q}`, $options: 'i' } },
+                    { category: { $regex: `^${q}`, $options: 'i' } },
                     { 'location.district': { $regex: `^${q}`, $options: 'i' } },
                 ],
-                isActive: true, isApproved: true,
+                isActive: true, isVerified: true,
             },
-            { name: 1, type: 1, 'location.district': 1, 'pricing.baseRatePerDay': 1 }
+            { name: 1, category: 1, 'location.district': 1, 'pricing.dailyRate': 1 }
         ).limit(limit).lean();
 
-        await cache.set(cacheKey, suggestions, 600);
-        return suggestions;
+        const mapped = suggestions.map(item => ({
+            ...item,
+            type: item.category,
+            pricing: { baseRatePerDay: item.pricing?.dailyRate }
+        }));
+
+        await cache.set(cacheKey, mapped, 600);
+        return mapped;
     }
 
     static async searchNearby(lat, lng, radiusKm = 25, limit = 10) {
@@ -146,18 +173,24 @@ class SearchService {
         const cached = await cache.get(cacheKey);
         if (cached) return cached;
 
-        const Machine = mongoose.model('Machine');
-        const results = await Machine.find({
+        const Equipment = mongoose.model('Equipment');
+        const results = await Equipment.find({
             'location.coordinates': {
                 $near: { $geometry: { type: 'Point', coordinates: [lng, lat] }, $maxDistance: radiusKm * 1000 },
             },
-            isActive: true, isApproved: true, status: 'available',
+            isActive: true, isVerified: true, status: 'available',
         })
-            .select('name type pricing.baseRatePerDay ratings location.district images')
+            .select('name category pricing.dailyRate ratings location.district images')
             .limit(limit).lean();
 
-        await cache.set(cacheKey, results, cache.searchTTL);
-        return results;
+        const mapped = results.map(item => ({
+            ...item,
+            type: item.category,
+            pricing: { baseRatePerDay: item.pricing?.dailyRate }
+        }));
+
+        await cache.set(cacheKey, mapped, cache.searchTTL);
+        return mapped;
     }
 }
 

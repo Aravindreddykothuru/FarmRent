@@ -23,6 +23,13 @@ const protect = async (req, res, next) => {
             return next(createError('User not found or deactivated', 401));
         }
 
+        if (user.passwordChangedAt) {
+            const changedSeconds = Math.floor(user.passwordChangedAt.getTime() / 1000);
+            if (decoded.iat < changedSeconds) {
+                return next(createError('Session expired due to password change. Please log in again.', 401));
+            }
+        }
+
         req.user = user;
         next();
     } catch {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { supabase } from "../nextfrontend/lib/supabase";
+import { io, Socket } from "socket.io-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,7 +88,6 @@ async function getBatteryLevel(): Promise<number | null> {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function OwnerGPSBroadcaster({ booking }: OwnerGPSBroadcasterProps) {
-  const supabase = createClientComponentClient();
 
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,18 +109,36 @@ export default function OwnerGPSBroadcaster({ booking }: OwnerGPSBroadcasterProp
   const watchIdRef = useRef<number | null>(null);
   const lastSentPointRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
   const tickerRef = useRef<NodeJS.Timeout | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
   // ── Tick every second to update "X seconds ago" display ───────────────────
   useEffect(() => {
-    tickerRef.current = setInterval(() => setTicker((t) => t + 1), 1000);
+    tickerRef.current = setInterval(() => setTicker((t: number) => t + 1), 1000);
     return () => {
       if (tickerRef.current) clearInterval(tickerRef.current);
     };
   }, []);
 
-  // ── Send a single location point to Supabase ──────────────────────────────
+  // ── Send a single location point to Supabase / Socket.IO ──────────────────
   const sendLocationPoint = useCallback(
     async (point: LocationPoint) => {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("equipment:location_update", {
+          equipmentId: point.equipment_id,
+          bookingId: point.booking_id,
+          latitude: point.lat,
+          longitude: point.lng,
+          accuracy: point.accuracy,
+          speed: point.speed,
+          heading: point.heading,
+        });
+        return true;
+      }
+
+      if (!supabase) {
+        setError("Supabase client is not initialized.");
+        return false;
+      }
       const { error: dbError } = await supabase
         .from("equipment_locations")
         .insert(point);
@@ -156,7 +174,7 @@ export default function OwnerGPSBroadcaster({ booking }: OwnerGPSBroadcasterProp
       const battery = await getBatteryLevel();
       const speedKmh = speed !== null ? parseFloat((speed * 3.6).toFixed(1)) : null;
 
-      setStats((prev) => ({
+      setStats((prev: BroadcastStats) => ({
         ...prev,
         currentLat: lat,
         currentLng: lng,
@@ -185,7 +203,7 @@ export default function OwnerGPSBroadcaster({ booking }: OwnerGPSBroadcasterProp
         const ok = await sendLocationPoint(point);
         if (ok) {
           lastSentPointRef.current = { lat, lng, time: now };
-          setStats((prev) => ({
+          setStats((prev: BroadcastStats) => ({
             ...prev,
             pointsSent: prev.pointsSent + 1,
             lastSentAt: new Date(),
@@ -214,7 +232,7 @@ export default function OwnerGPSBroadcaster({ booking }: OwnerGPSBroadcasterProp
     }
 
     setError(null);
-    setStats((prev) => ({
+    setStats((prev: BroadcastStats) => ({
       ...prev,
       pointsSent: 0,
       sessionStarted: new Date(),
@@ -222,6 +240,15 @@ export default function OwnerGPSBroadcaster({ booking }: OwnerGPSBroadcasterProp
       distanceTraveled: 0,
     }));
     lastSentPointRef.current = null;
+
+    // Connect to Socket.IO
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+    const socketOrigin = backendUrl || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
+    socketRef.current = io(`${socketOrigin}/tracking`, {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       handlePosition,
@@ -242,6 +269,10 @@ export default function OwnerGPSBroadcaster({ booking }: OwnerGPSBroadcasterProp
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
     setIsActive(false);
     lastSentPointRef.current = null;
   }, []);
@@ -251,6 +282,9 @@ export default function OwnerGPSBroadcaster({ booking }: OwnerGPSBroadcasterProp
     return () => {
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+      if (socketRef.current) {
+        socketRef.current.disconnect();
       }
     };
   }, []);

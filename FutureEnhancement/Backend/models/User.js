@@ -5,7 +5,7 @@ const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema(
     {
-        name: { type: String, required: true, trim: true },
+        fullName: { type: String, required: true, trim: true },
         email: { type: String, required: true, unique: true, lowercase: true, trim: true },
         password: { type: String, required: true, minlength: 6, select: false },
         role: { type: String, enum: ['farmer', 'owner', 'admin'], default: 'farmer' },
@@ -19,6 +19,13 @@ const userSchema = new mongoose.Schema(
         isVerified: { type: Boolean, default: false },
         lastLogin: { type: Date },
 
+        resetPasswordToken: { type: String },
+        resetPasswordExpire: { type: Date },
+        passwordChangedAt: { type: Date },
+        passwordHistory: { type: [String], default: [] },
+        resetAttempts: { type: Number, default: 0 },
+        resetLockUntil: { type: Date },
+
         ratings: {
             average: { type: Number, default: 0 },
             count: { type: Number, default: 0 },
@@ -30,7 +37,22 @@ const userSchema = new mongoose.Schema(
 // Hash password before save
 userSchema.pre('save', async function (next) {
     if (!this.isModified('password')) return next();
-    this.password = await bcrypt.hash(this.password, 12);
+
+    const hashed = await bcrypt.hash(this.password, 12);
+    this.password = hashed;
+
+    if (!this.isNew) {
+        this.passwordChangedAt = Date.now() - 1000;
+    }
+
+    if (!this.passwordHistory) {
+        this.passwordHistory = [];
+    }
+    this.passwordHistory.push(hashed);
+    if (this.passwordHistory.length > 3) {
+        this.passwordHistory.shift();
+    }
+
     next();
 });
 

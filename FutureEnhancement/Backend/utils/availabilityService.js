@@ -1,25 +1,25 @@
 'use strict';
 
-const Booking = require('../models/Booking');
-const Machine = require('../models/Machine');
+const EquipmentRental = require('../models/EquipmentRental');
+const Equipment = require('../models/Equipment');
 const { createError } = require('./helpers');
 
 /**
- * Machine Availability & Conflict Detection Service
+ * Equipment Availability & Conflict Detection Service
  */
 class AvailabilityService {
     /**
-     * Check if a machine is available for the requested slot
+     * Check if an equipment is available for the requested slot
      */
-    static async checkAvailability(machineId, startDate, endDate, startTime, endTime, excludeBookingId = null) {
-        const machine = await Machine.findById(machineId);
-        if (!machine) throw createError('Machine not found', 404);
+    static async checkAvailability(equipmentId, startDate, endDate, startTime, endTime, excludeRentalId = null) {
+        const equipment = await Equipment.findById(equipmentId);
+        if (!equipment) throw createError('Equipment not found', 404);
 
-        if (!machine.isActive || !machine.isApproved) {
-            throw createError('Machine is not available for booking', 400);
+        if (!equipment.isActive || !equipment.isVerified) {
+            throw createError('Equipment is not available for rental', 400);
         }
-        if (machine.status === 'maintenance' || machine.status === 'inactive') {
-            throw createError(`Machine is currently in ${machine.status} status`, 400);
+        if (equipment.status === 'maintenance' || equipment.status === 'inactive') {
+            throw createError(`Equipment is currently in ${equipment.status} status`, 400);
         }
 
         const start = new Date(startDate);
@@ -33,63 +33,63 @@ class AvailabilityService {
         }
 
         // Check blackout dates
-        const hasBlackout = machine.availability.blackoutDates.some((bd) => {
+        const hasBlackout = equipment.availability.blackoutDates.some((bd) => {
             const blackout = new Date(bd);
             return blackout >= start && blackout <= end;
         });
         if (hasBlackout) {
-            throw createError('Machine has maintenance/blocked dates in the requested period', 409);
+            throw createError('Equipment has maintenance/blocked dates in the requested period', 409);
         }
 
         // Check working days
         const requestedDays = this._getDatesInRange(start, end);
         const offDays = requestedDays.filter((date) => {
             const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()];
-            return !machine.availability.workingDays.includes(dayName);
+            return !equipment.availability.workingDays.includes(dayName);
         });
         if (offDays.length > 0) {
             throw createError(
-                `Machine is not available on: ${offDays.map((d) => d.toDateString()).join(', ')}`, 400
+                `Equipment is not available on: ${offDays.map((d) => d.toDateString()).join(', ')}`, 400
             );
         }
 
         // Check time conflicts
         const conflictQuery = {
-            machine: machineId,
-            status: { $in: ['pending', 'confirmed', 'active'] },
+            equipment: equipmentId,
+            status: { $in: ['requested', 'approved', 'active'] },
             $or: [{ startDate: { $lte: end }, endDate: { $gte: start } }],
         };
-        if (excludeBookingId) conflictQuery._id = { $ne: excludeBookingId };
+        if (excludeRentalId) conflictQuery._id = { $ne: excludeRentalId };
 
-        const conflictingBookings = await Booking.find(conflictQuery)
+        const conflictingRentals = await EquipmentRental.find(conflictQuery)
             .select('bookingId startDate endDate startTime endTime status');
 
-        const timeConflicts = conflictingBookings.filter((booking) =>
-            this._hasTimeOverlap(startTime, endTime, booking.startTime, booking.endTime,
-                start, end, booking.startDate, booking.endDate)
+        const timeConflicts = conflictingRentals.filter((rental) =>
+            this._hasTimeOverlap(startTime, endTime, rental.startTime, rental.endTime,
+                start, end, rental.startDate, rental.endDate)
         );
 
         if (timeConflicts.length > 0) {
-            throw createError('Time slot conflict detected. Machine is already booked during this period.', 409, {
-                conflicts: timeConflicts.map((b) => ({
-                    bookingId: b.bookingId,
-                    from: `${b.startDate.toDateString()} ${b.startTime}`,
-                    to: `${b.endDate.toDateString()} ${b.endTime}`,
-                    status: b.status,
+            throw createError('Time slot conflict detected. Equipment is already booked during this period.', 409, {
+                conflicts: timeConflicts.map((r) => ({
+                    bookingId: r.bookingId,
+                    from: `${r.startDate.toDateString()} ${r.startTime}`,
+                    to: `${r.endDate.toDateString()} ${r.endTime}`,
+                    status: r.status,
                 })),
             });
         }
 
-        return { available: true, machine: { id: machine._id, name: machine.name, type: machine.type, status: machine.status } };
+        return { available: true, equipment: { id: equipment._id, name: equipment.name, category: equipment.category, status: equipment.status } };
     }
 
-    static async getAvailableSlots(machineId, fromDate, toDate) {
-        const machine = await Machine.findById(machineId);
-        if (!machine) throw createError('Machine not found', 404);
+    static async getAvailableSlots(equipmentId, fromDate, toDate) {
+        const equipment = await Equipment.findById(equipmentId);
+        if (!equipment) throw createError('Equipment not found', 404);
 
-        const existingBookings = await Booking.find({
-            machine: machineId,
-            status: { $in: ['confirmed', 'active', 'pending'] },
+        const existingRentals = await EquipmentRental.find({
+            equipment: equipmentId,
+            status: { $in: ['requested', 'approved', 'active'] },
             startDate: { $lte: new Date(toDate) },
             endDate: { $gte: new Date(fromDate) },
         }).select('startDate endDate startTime endTime status');
@@ -97,13 +97,13 @@ class AvailabilityService {
         const dates = this._getDatesInRange(new Date(fromDate), new Date(toDate));
         return dates.map((date) => {
             const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()];
-            const isWorkingDay = machine.availability.workingDays.includes(dayName);
-            const isBlackedOut = machine.availability.blackoutDates.some(
+            const isWorkingDay = equipment.availability.workingDays.includes(dayName);
+            const isBlackedOut = equipment.availability.blackoutDates.some(
                 (bd) => new Date(bd).toDateString() === date.toDateString()
             );
-            const dayBookings = existingBookings
-                .filter((b) => date >= new Date(b.startDate) && date <= new Date(b.endDate))
-                .map((b) => ({ time: `${b.startTime}-${b.endTime}`, status: b.status }));
+            const dayBookings = existingRentals
+                .filter((r) => date >= new Date(r.startDate) && date <= new Date(r.endDate))
+                .map((r) => ({ time: `${r.startTime}-${r.endTime}`, status: r.status }));
 
             return {
                 date: date.toISOString().split('T')[0],
@@ -112,8 +112,8 @@ class AvailabilityService {
                 isBlackedOut,
                 isAvailable: isWorkingDay && !isBlackedOut && dayBookings.length === 0,
                 bookedSlots: dayBookings,
-                availableFrom: machine.availability.defaultStartTime,
-                availableTo: machine.availability.defaultEndTime,
+                availableFrom: equipment.availability.defaultStartTime,
+                availableTo: equipment.availability.defaultEndTime,
             };
         });
     }
