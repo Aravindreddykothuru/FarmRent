@@ -204,7 +204,6 @@ export default function Navbar() {
 
     const mainLinks = [
         { href: '/browse',       label: t('nav.browse') },
-        { href: '/ai-assistant', label: t('nav.aiAssistant') },
         { href: '/how-it-works', label: t('nav.howItWorks') },
     ];
 

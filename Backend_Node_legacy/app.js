@@ -5,7 +5,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const { authLimiter, paymentLimiter, generalLimiter } = require('./middleware/redisRateLimiter');
-const { createProxyMiddleware } = require('http-proxy-middleware');
 const { redisClient } = require('./services/tracking-service/redisClient');
 const supabase = require('./lib/supabase');
 const { HttpError } = require('./lib/httpError');
@@ -87,27 +86,6 @@ function buildBackendApplication() {
     // KYC uploads are identity documents: they are never served as public static files.
     app.use('/uploads/kyc', (req, res) => res.status(404).json({ status: 'error', message: 'Not found' }));
     app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-    // Optional Python sidecar (ML / legacy GPS). Without FLASK_URL the routes answer 503 instead of
-    // proxying to a port nothing listens on.
-    if (process.env.FLASK_URL) {
-        app.use(
-            '/api/v2',
-            createProxyMiddleware({
-                target: process.env.FLASK_URL,
-                changeOrigin: true,
-                pathRewrite: { '^/api/v2': '/api' },
-            }),
-        );
-    } else {
-        app.use('/api/v2', (req, res) =>
-            res.status(503).json({
-                status: 'error',
-                code: 'SERVICE_NOT_CONFIGURED',
-                message: 'The optional Flask sidecar is not configured (FLASK_URL)',
-            }),
-        );
-    }
 
     // ── Auth (rate-limited) ───────────────────────────────────────────────────
     // Credential endpoints (login, register, password reset, OTP) keep the strict per-IP auth limit. Session

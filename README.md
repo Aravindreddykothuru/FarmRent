@@ -79,7 +79,7 @@ nextfrontend/               Next.js app and the unified server
   scripts/ui-smoke.mjs      browser smoke test
 ```
 
-Other top-level folders (`frontend/`, `agronexus-springboot/`, `FutureEnhancement/`, `GPS/`) are experiments that are not part of the running application.
+Nothing else in the repository is part of the product: earlier prototypes (a Flask sidecar, a Spring Boot service, a separate Next.js app, a MongoDB backend) were never deployed and have been removed; they remain in git history.
 
 ---
 

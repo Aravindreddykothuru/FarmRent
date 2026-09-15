@@ -1,3 +1,0 @@
-// Forward to utils/availabilityService
-const AvailabilityService = require('./utils/availabilityService');
-module.exports = AvailabilityService;

@@ -1,3 +1,0 @@
-// Forward to server.js
-const server = require('./server');
-module.exports = server;

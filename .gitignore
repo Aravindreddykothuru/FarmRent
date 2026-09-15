@@ -24,7 +24,7 @@ coverage/
 test-results/
 playwright-report/
 
-# Local databases (the legacy Python prototype's SQLite file)
+# Local databases (SQLite files left by the removed Flask prototype)
 app.db
 
 # Logs

@@ -1,3 +1,0 @@
-// Forward to controllers/mlController
-const mlController = require('./controllers/mlController');
-module.exports = mlController;

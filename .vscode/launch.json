@@ -2,42 +2,22 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "🌿 Flask — app.py",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/FutureEnhancement/app.py",
-            "cwd": "${workspaceFolder}/FutureEnhancement",
-            "console": "integratedTerminal",
-            "env": {
-                "FLASK_ENV": "development",
-                "FLASK_DEBUG": "1"
-            },
-            "jinja": true
-        },
-        {
-            "name": "🚀 Backend — server.js",
+            "name": "FarmRent — unified server (local Docker stack)",
             "type": "node",
             "request": "launch",
-            "program": "${workspaceFolder}/Backend/server.js",
-            "cwd": "${workspaceFolder}/Backend",
+            "program": "${workspaceFolder}/nextfrontend/server.js",
+            "cwd": "${workspaceFolder}/nextfrontend",
+            "env": {
+                "FARMRENT_ENV_FILE": "../Backend_Node_legacy/.env"
+            },
             "console": "integratedTerminal"
         },
         {
-            "name": "🌐 Next.js — Chrome",
+            "name": "FarmRent — Chrome",
             "type": "chrome",
             "request": "launch",
             "url": "http://localhost:3000",
             "webRoot": "${workspaceFolder}/nextfrontend"
-        }
-    ],
-    "compounds": [
-        {
-            "name": "🟢 FarmRent — All Services",
-            "configurations": [
-                "🌿 Flask — app.py",
-                "🚀 Backend — server.js"
-            ],
-            "stopAll": true
         }
     ]
 }

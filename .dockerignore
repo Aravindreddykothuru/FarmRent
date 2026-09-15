@@ -22,8 +22,9 @@ instance
 .claude
 .venv
 
-# Not part of the unified app (Backend/ is the pre-move copy with local secrets)
+# Local leftovers of removed prototypes and old copies — untracked, but some hold local secrets
 _archive
+scratch
 Backend
 backend
 frontend
@@ -31,3 +32,4 @@ FutureEnhancement
 agronexus-springboot
 GPS
 Nonfunctionalrequirements
+nginx

@@ -235,7 +235,7 @@ async function main() {
             await visit(anon, '/password-reset', { expectPath: '/forgot-password', label: '/password-reset (legacy → /forgot-password)' });
             for (const path of ['/dashboard', '/dashboard/farmer', '/dashboard/owner', '/dashboard/admin', '/dashboard/profile',
                 '/bookings', `/book/${OTHER_EQUIPMENT}`, '/offers', '/chats', '/disputes', '/wishlist', '/add-equipment',
-                '/payment/success', '/driver', '/ai-assistant', '/analytics', '/wallet', '/notifications', '/kyc']) {
+                '/payment/success', '/driver', '/analytics', '/wallet', '/notifications', '/kyc']) {
                 await visit(anon, path, { expectPath: '/login', expectNext: true, label: `${path} (signed out → login)` });
             }
 
@@ -323,7 +323,7 @@ async function main() {
             if (!renter.page.url().startsWith(BASE_URL)) await uiLogin(renter, ACCOUNTS.renter, '/dashboard/farmer');
             const pages = ['/dashboard', '/dashboard/farmer', '/dashboard/profile', '/dashboard/kyc', '/bookings', '/offers', '/chats',
                 '/disputes', '/wishlist', '/notifications', '/wallet', '/kyc', '/browse', `/equipment/${OTHER_EQUIPMENT}`,
-                `/book/${OTHER_EQUIPMENT}`, '/ai-assistant'];
+                `/book/${OTHER_EQUIPMENT}`];
             for (const path of pages) await visit(renter, path, path === '/dashboard' ? { allowPaths: ['/dashboard/farmer'] } : {});
             if (bookingId) {
                 for (const path of [`/bookings/${bookingId}`, `/tracking/${bookingId}`, `/dashboard/track/${bookingId}`,

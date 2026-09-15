@@ -3,7 +3,6 @@
  *
  * With `npm run dev` / `npm start` (unified server), API is same-origin (port 3000).
  * Set NEXT_PUBLIC_API_URL if the API is on another host/port.
- * Node proxies /api/v2/* → Flask when Flask is running.
  */
 
 import { toast } from 'sonner';
@@ -34,11 +33,6 @@ export function getApiBaseUrl(): string {
 function getNodeApiBase(): string {
   const b = getApiBaseUrl();
   return b ? `${b}/api/v1` : '/api/v1';
-}
-
-function getFlaskApiBase(): string {
-  const b = getApiBaseUrl();
-  return b ? `${b}/api/v2` : '/api/v2';
 }
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
@@ -181,15 +175,6 @@ export const nodeApi = {
     uploadForm: <T>(path: string, formData: FormData) => request<T>(getNodeApiBase(), path, { method: 'POST', body: formData }),
 };
 
-// ─── Flask API client (/api/v2 → Flask /api) ──────────────────────────────────
-export const flaskApi = {
-    get: <T>(path: string) => request<T>(getFlaskApiBase(), path, { method: 'GET' }),
-    post: <T>(path: string, body: unknown) => request<T>(getFlaskApiBase(), path, { method: 'POST', body: JSON.stringify(body) }),
-    put: <T>(path: string, body: unknown) => request<T>(getFlaskApiBase(), path, { method: 'PUT', body: JSON.stringify(body) }),
-    patch: <T>(path: string, body: unknown) => request<T>(getFlaskApiBase(), path, { method: 'PATCH', body: JSON.stringify(body) }),
-    delete: <T>(path: string) => request<T>(getFlaskApiBase(), path, { method: 'DELETE' }),
-};
-
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 export const auth = {
     login: (email: string, password: string) =>
@@ -232,37 +217,6 @@ export const mlNode = {
         nodeApi.get(`/ml/recommendations?${new URLSearchParams(params)}`),
     getOptimalPricing: (data: unknown) => nodeApi.post('/ml/optimal-pricing', data),
     getChurnRisk: () => nodeApi.get('/ml/churn-risk'),
-};
-
-// ─── GPS tracking (Flask) ─────────────────────────────────────────────────────
-export const gps = {
-    logLocation: (data: { user_id: number; latitude: number; longitude: number; altitude?: number; speed?: number }) =>
-        flaskApi.post('/gps/log', data),
-    getCurrentLocation: (userId: number) => flaskApi.get(`/gps/current/${userId}`),
-    getRoute: (userId: number) => flaskApi.get(`/gps/route/${userId}`),
-};
-
-// ─── Insurance (Flask) ────────────────────────────────────────────────────────
-export const insurance = {
-    createPolicy: (data: unknown) => flaskApi.post('/insurance/policy/create', data),
-    createClaim: (data: unknown) => flaskApi.post('/insurance/claim/create', data),
-    approveClaim: (data: unknown) => flaskApi.post('/insurance/claim/approve', data),
-};
-
-// ─── Payments ─────────────────────────────────────────────────────────────────
-// ⚠️  DEPRECATED: These methods return HTTP 410. Use `razorpayApi.*` instead.
-export const payments = {
-    /** @deprecated Use razorpayApi.createOrder() */
-    initiate:  (data: unknown) => nodeApi.post('/payments/initiate', data),
-    /** @deprecated Use razorpayApi.verify() */
-    confirm:   (data: unknown) => nodeApi.post('/payments/confirm', data),
-    /** @deprecated Use razorpayApi.refund() */
-    refund:    (data: unknown) => nodeApi.post('/payments/refund', data),
-    /** @deprecated Razorpay Checkout handles card validation client-side */
-    validateCard: (data: unknown) => nodeApi.post('/payments/validate-card', data),
-    // Legacy Flask-proxied helpers kept for backwards compat
-    createPayment: (data: unknown) => flaskApi.post('/payments/create', data),
-    createSubscription: (data: unknown) => flaskApi.post('/payments/subscribe', data),
 };
 
 // ─── Admin API ────────────────────────────────────────────────────────────────

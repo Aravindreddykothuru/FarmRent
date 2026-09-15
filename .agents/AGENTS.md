@@ -2,23 +2,20 @@
 
 ## Project Overview
 
-**FarmRent** is a full-stack farm equipment rental platform connecting farmers with equipment owners.
-Single unified server (`nextfrontend/server.js`) serves both Next.js (port 3000) and Express REST API on the same port.
+**FarmRent** is a farm equipment rental platform connecting farmers with equipment owners.
+One process (`nextfrontend/server.js`) serves the Next.js pages, the Express REST API and Socket.IO on one port (3000).
 
 ### Stack at a Glance
 | Layer | Technology |
 |---|---|
 | Frontend | Next.js 16 (App Router), React 19, Tailwind CSS, shadcn/ui |
 | Backend | Node.js 20, Express 4 (`Backend_Node_legacy/`) |
-| Database | Supabase (PostgreSQL + Realtime) |
-| Auth | Custom JWT (access 15 min + refresh 7 days), email OTP |
-| Payments | Razorpay (primary) + Stripe (secondary) |
-| Real-time | Socket.IO (notifications + GPS tracking) |
-| Cache | Redis (driver geo-search, rate limiting, OTP) |
-| Search | Elasticsearch 8.x |
-| Email | Multi-provider: Brevo SMTP → Gmail SMTP → Resend API → Ethereal |
-| GPS | Supabase Realtime + Socket.IO + OSRM routing |
-| CI | GitHub Actions |
+| Database | PostgreSQL + PostGIS behind PostgREST (Supabase-compatible); SQL migrations in `Backend_Node_legacy/db/migrations` |
+| Auth | Custom JWT (access 15 min, httpOnly cookie) + rotating refresh token in Redis |
+| Payments | Razorpay + cash on delivery |
+| Real-time | Socket.IO: `/tracking` (booking rooms, GPS) and `/notifications` (per user) |
+| Cache | Redis (sessions, rate limits, caches, BullMQ queues, Socket.IO adapter) |
+| CI | GitHub Actions (`.github/workflows/ci.yml`) |
 
 ---
 
@@ -26,27 +23,23 @@ Single unified server (`nextfrontend/server.js`) serves both Next.js (port 3000)
 
 ```
 farmers/
-├── Backend_Node_legacy/        ← Express REST API (primary backend)
+├── Backend_Node_legacy/        ← Express REST API (the only backend, despite the name)
 │   ├── app.js                  ← Express app factory (no listen)
-│   ├── server.js               ← Standalone dev entry only
-│   ├── services/               ← Feature micro-services (auth, booking, payment, etc.)
-│   ├── routes/                 ← Shared routes (messages, invoices, kyc, etc.)
-│   ├── middleware/             ← auth, requireRole, errorHandler, rateLimiter, etc.
-│   ├── lib/                    ← Shared libs (logger, config, emailService, metrics)
+│   ├── services/               ← Feature routers (auth, booking, payment, tracking, …)
+│   ├── routes/                 ← Shared routers (machines, messages, kyc, …)
+│   ├── middleware/             ← auth, requireRole, errorHandler, rate limiters
+│   ├── lib/                    ← logger, config, email, queues, metrics
 │   ├── workers/                ← BullMQ workers (invoice, cron, image)
-│   ├── prisma/                 ← Prisma schema + migrations
-│   └── .env                   ← Single source of truth for ALL env vars
-├── nextfrontend/               ← Next.js 16 App Router frontend
-│   ├── server.js               ← Unified server entry (Next + Express on same port)
-│   ├── app/                    ← App Router pages and layouts
-│   ├── components/             ← Reusable React components
-│   └── .env.local              ← Frontend-specific env vars (NEXT_PUBLIC_*)
-├── agronexus-springboot/       ← Spring Boot service (secondary/experimental)
-├── FutureEnhancement/          ← Flask sidecar (ML features, /api/v2 proxy)
-├── GPS/                        ← GPS tracking service files
-├── nginx/                      ← Nginx gateway config
-├── docker-compose.yml          ← Full stack: postgres, redis, elasticsearch, nginx
-└── Dockerfile                  ← Unified app container
+│   ├── db/                     ← migrate.js, migrations/, seed.js
+│   └── __tests__/              ← unit + integration (incl. api-contract.test.js)
+├── nextfrontend/               ← Next.js app and the unified server
+│   ├── server.js               ← Entry point (dev and production)
+│   ├── proxy.ts                ← Sign-in redirects for protected pages
+│   └── scripts/                ← ui-smoke.mjs, check-links.cjs
+├── infra/local/                ← Local stack bootstrap (PostgREST gateway, DB roles)
+├── scripts/setup-local-env.js  ← Generates local env files with fresh secrets
+├── docker-compose.yml          ← Local stack: Postgres/PostGIS, PostgREST, Redis (+ app profile)
+└── Dockerfile                  ← Production image of the unified app
 ```
 
 ---
@@ -54,121 +47,42 @@ farmers/
 ## Coding Conventions
 
 ### Backend (Node.js / Express)
-- All services live under `Backend_Node_legacy/services/<name>-service/routes.js`
-- Route handlers should be thin; business logic goes in repositories or service files
-- Use `require('./lib/logger')` (Pino) for logging — **never** `console.log` in production code
-- Error handling: always call `next(err)` to propagate to `errorHandler` middleware
-- Authentication: use `auth(required)` middleware — `auth(true)` = mandatory, `auth(false)` = optional
-- Role checks: use `requireRole('admin' | 'farmer' | 'owner')` after `auth(true)`
-- Rate limiters from `middleware/redisRateLimiter.js`: `authLimiter`, `paymentLimiter`, `generalLimiter`
-- Validation: use **Zod** schemas for request body/query validation
-- Background jobs: use **BullMQ** queues via `lib/queueManager.js`
-- Environment variables are validated at startup in `lib/config.js` — add new vars there
+- Use `lib/logger` (Pino) — never `console.log` in application code.
+- Throw `HttpError(status, code, message)` (or call `next(err)`); `errorHandler` builds the response envelope.
+- Authentication: `auth(true)` mandatory, `auth(false)` optional; role checks with `requireRole(...)`.
+- Validate request bodies and queries with Zod schemas in `validations/schemas.js`.
+- Business rules (prices, rental states, overlap checks) live on the server; never trust client amounts.
+- Every new route needs a valid and an invalid request in `__tests__/integration/api-contract.test.js` — the suite fails otherwise.
+- Schema changes are new numbered SQL files in `db/migrations`; never edit an applied migration.
 
 ### Frontend (Next.js)
-- Use the **App Router** (`app/` directory) — no Pages Router
-- Tailwind CSS + shadcn/ui components — follow existing component patterns in `components/`
-- API calls go through the unified server at `/api/v1/*` (no separate backend URL in prod)
-- Real-time features use `socket.io-client` from the `hooks/` directory
-- Forms: `react-hook-form` + Zod resolvers
-- Translations: `i18n/` with next-intl — always add keys to messages files
+- App Router only. API calls go through `lib/api.ts` (`nodeApi`) to `/api/v1` on the same origin.
+- Real-time features use the Socket.IO helpers in `lib/socket.ts`; sockets authenticate with the session cookie.
+- The browser never talks to the database directly.
+- Translations live in `messages/*.json`; add keys to `en.json` at least.
 
 ### Environment Variables
-- Backend env: `Backend_Node_legacy/.env` — use `lib/config.js` to access and validate
-- Frontend env: `nextfrontend/.env.local` — only `NEXT_PUBLIC_*` vars are exposed to browser
-- **Never commit `.env` or `.env.local` files** — only update `.env.example` files
-
----
-
-## Critical Architecture Notes
-
-1. **Single Port, Single Process**: In production, `nextfrontend/server.js` is the ONLY entry point.
-   Requests to `/api/*` and `/socket.io/*` are handled by Express; everything else goes to Next.js.
-
-2. **Backend_Node_legacy is the real backend**: Despite the `_legacy` name, this IS the active production backend.
-   `agronexus-springboot/` is a secondary service and should not be confused with the primary.
-
-3. **Flask Sidecar (`/api/v2`)**: ML/AI features proxy to `http://localhost:5001` (Flask).
-   The Node backend proxies `/api/v2/*` to Flask via `http-proxy-middleware`.
-
-4. **Prisma + Supabase**: Prisma handles schema/migrations; Supabase JS client is used for realtime subscriptions and some queries. Do NOT use both for the same table operations — prefer Supabase client for realtime, Prisma for transactional queries.
-
-5. **Email Service Fallback Chain**: `emailService.js` tries providers in order:
-   Brevo SMTP → Gmail SMTP → Resend API → Ethereal (dev). Always test with Ethereal in dev.
-
-6. **Redis is Optional**: The app degrades gracefully if Redis is unavailable (rate limiting and geo-search fall back; OTP uses in-memory store).
-
-7. **BullMQ Workers**: `invoiceWorker`, `cronWorker`, `imageWorker` are auto-started when `app.js` loads. Do not duplicate require calls.
+- Backend/server env: `Backend_Node_legacy/.env` (or the file named by `FARMRENT_ENV_FILE`); see `.env.example`.
+- **Never commit `.env` files** — only update `.env.example` files.
 
 ---
 
 ## Development Workflow
 
-### Starting the App Locally
-```powershell
-# From nextfrontend/ — runs unified server (Next.js + Express on port 3000)
-npm run dev
-
-# Or with Docker (full stack including Postgres, Redis, Elasticsearch)
-docker-compose up --build
+```bash
+npm run setup:env      # generate local secrets
+npm run stack:up       # Postgres, PostgREST gateway, Redis
+npm run install:all
+npm run migrate && npm run seed
+npm run dev            # http://localhost:3000
+npm test               # backend unit + integration (needs the stack)
+npm run lint && npm run typecheck
 ```
-
-### Running Backend Tests
-```powershell
-# From Backend_Node_legacy/
-npm test
-```
-
-### Database Migrations
-```powershell
-# From Backend_Node_legacy/ — Prisma migrations
-npx prisma migrate dev --name <migration_name>
-npx prisma generate
-
-# Or use the provided PowerShell scripts from root
-.\apply-migrations.ps1
-.\run-migrations.ps1
-```
-
----
-
-## MCP Server Integration
-
-### Supabase MCP (`supabase-mcp-server`)
-- Use `execute_sql` to run ad-hoc queries against the Supabase PostgreSQL database
-- Use `list_tables` / `list_migrations` before modifying schema
-- Always use `apply_migration` for schema changes (not raw SQL in prod)
-- Use `get_logs` to investigate Supabase edge function errors
-
-### Stripe MCP (`stripe`)
-- The project uses **Razorpay as primary** and Stripe as secondary payment provider
-- Use Stripe MCP tools for Stripe-specific features only (webhooks, refunds via `create_refund`)
-- Check `Backend_Node_legacy/services/payment-service/` for the active payment integration
 
 ---
 
 ## Common Gotchas
 
-- **`Backend_Node_legacy` not `Backend`**: The README mentions `Backend/` but the actual directory is `Backend_Node_legacy/`. Always use the correct path.
-- **Prisma client import**: Always `const { PrismaClient } = require('@prisma/client')` — the client is generated to `node_modules/@prisma/client`.
-- **CORS**: In dev, localtunnel (`.loca.lt`) and ngrok origins are auto-allowed. In prod, set `ALLOWED_ORIGINS` env var.
-- **Webhook body parsing**: `/api/payment/webhook` skips `express.json()` to preserve raw body for Razorpay signature verification. Do NOT add body parsing middleware on this route.
-- **Socket.IO namespace**: The unified server in `nextfrontend/server.js` attaches Socket.IO — import from there, not from a separate backend Socket.IO instance.
-- **Next.js public env**: Variables exposed to the browser MUST be prefixed with `NEXT_PUBLIC_`. Others are server-side only.
-
----
-
-## File Naming Patterns
-
-| Artifact | Pattern |
-|---|---|
-| Express service routes | `services/<name>-service/routes.js` |
-| Express standalone routes | `routes/<name>.js` |
-| BullMQ workers | `workers/<name>Worker.js` |
-| Shared libs | `lib/<name>.js` |
-| Middleware | `middleware/<name>.js` |
-| Next.js pages | `app/<path>/page.tsx` |
-| Next.js layouts | `app/<path>/layout.tsx` |
-| Next.js API routes | `app/api/<path>/route.ts` |
-| React components | `components/<Name>.tsx` |
-| Custom hooks | `hooks/use<Name>.ts` |
+- **Webhook body parsing**: `/api/payment/webhook` skips `express.json()` so the Razorpay signature can be verified on the raw body.
+- **Socket.IO** is attached to the unified server in `nextfrontend/server.js`.
+- **Next.js public env**: anything prefixed `NEXT_PUBLIC_` is compiled into the browser bundle — never put a secret there.

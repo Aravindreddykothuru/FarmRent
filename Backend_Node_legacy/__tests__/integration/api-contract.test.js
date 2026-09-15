@@ -826,13 +826,6 @@ describe('API contract — every mounted route', () => {
 
         await check('GET /api/v1/analytics/owner', ctx.ownerAgent.get('/api/v1/analytics/owner'), 200);
         await check('GET /api/v1/analytics/owner', anon().get('/api/v1/analytics/owner'), 401);
-        await check(
-            'GET /api/v1/analytics/predictions',
-            ctx.ownerAgent.get('/api/v1/analytics/predictions'),
-            503,
-            'SERVICE_NOT_CONFIGURED',
-        );
-        await check('GET /api/v1/analytics/predictions', anon().get('/api/v1/analytics/predictions'), 401);
 
         const demand = await check('GET /api/v1/ml/demand-prediction', anon().get('/api/v1/ml/demand-prediction?type=tractor'), 200);
         expect(demand.demand).toHaveLength(12);

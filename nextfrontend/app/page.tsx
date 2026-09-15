@@ -423,24 +423,6 @@ export default function HomePage() {
                     </div>
                 </div>
 
-                {/* ══════════════════════════════════ AI CTA STRIP ══ */}
-                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-3xl p-6 lg:p-8 flex flex-col sm:flex-row items-center justify-between gap-5 text-white shadow-lg">
-                    <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0">
-                            <Zap className="h-7 w-7 text-white" />
-                        </div>
-                        <div>
-                            <p className="font-black text-lg">{t('home.aiTitle')}</p>
-                            <p className="text-indigo-200 text-sm mt-0.5">{t('home.aiDesc')}</p>
-                        </div>
-                    </div>
-                    <Link href="/ai-assistant" className="flex-shrink-0">
-                        <Button className="bg-white text-indigo-700 hover:bg-indigo-50 font-bold rounded-xl px-6">
-                            {t('home.tryFree')} →
-                        </Button>
-                    </Link>
-                </div>
-
                 <div className="h-2" />
             </div>
             <span className="hidden" aria-hidden><Quote size={0} /></span>

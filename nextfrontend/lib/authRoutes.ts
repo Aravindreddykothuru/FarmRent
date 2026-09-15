@@ -14,7 +14,6 @@ export const PROTECTED_PREFIXES = [
     '/payment',
     '/driver',
     '/profile',
-    '/ai-assistant',
     '/analytics',
     '/wallet',
     '/notifications',

@@ -7,7 +7,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import {
     Search, Calendar, Truck, CheckCircle,
     Users, Shield, DollarSign, MessageSquare,
-    FileText, Wrench, ArrowRight, Zap,
+    FileText, Wrench,
 } from 'lucide-react';
 
 type Step = { icon: React.ElementType; title: string; desc: string };
@@ -168,27 +168,6 @@ export default function HowItWorksPage() {
                 </div>
             </section>
 
-            {/* ── AI feature callout ── */}
-            <section className="py-6">
-                <div className="container mx-auto px-4 lg:px-8">
-                    <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-3xl p-7 lg:p-10 flex flex-col sm:flex-row items-center justify-between gap-5 text-white shadow-lg">
-                        <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0">
-                                <Zap className="h-7 w-7 text-white" />
-                            </div>
-                            <div>
-                                <p className="font-black text-xl">{t('howItWorks.aiTitle')}</p>
-                                <p className="text-indigo-200 text-sm mt-0.5">{t('howItWorks.aiDesc')}</p>
-                            </div>
-                        </div>
-                        <Link href="/ai-assistant" className="flex-shrink-0">
-                            <Button className="bg-white text-indigo-700 hover:bg-indigo-50 font-bold rounded-xl px-6">
-                                {t('howItWorks.askAI')} <ArrowRight className="h-4 w-4 ml-1" />
-                            </Button>
-                        </Link>
-                    </div>
-                </div>
-            </section>
 
             {/* ── Bottom CTA ── */}
             <section className="py-16 lg:py-20 bg-gradient-to-br from-green-900 to-green-800">

@@ -47,7 +47,6 @@ export default function NotFound() {
                             { href: '/login',        label: t('auth.signIn') },
                             { href: '/register',     label: t('nav.register') },
                             { href: '/how-it-works', label: t('nav.howItWorks') },
-                            { href: '/ai-assistant', label: t('nav.aiAssistant') },
                         ].map(l => (
                             <Link
                                 key={l.href}

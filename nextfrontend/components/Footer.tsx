@@ -13,7 +13,6 @@ export default function Footer() {
     const LINKS = {
         [t('footer.explore')]: [
             { href: '/browse',             label: t('footer.browseEquipment') },
-            { href: '/ai-assistant',       label: t('footer.aiAssistant') },
             { href: '/how-it-works',       label: t('footer.howItWorks') },
             { href: '/browse?sort=rating', label: t('footer.topRated') },
         ],
