@@ -423,30 +423,42 @@ exports.refreshAccessToken = async (req, res, next) => {
 // ─── LOGOUT ───────────────────────────────────────────────────────────────────
 exports.logout = async (req, res, next) => {
     try {
-        if (req.user?.sid) {
-            await sessionService.revokeSession(req.user.sid, req.user.id);
+        // Signing out has to work when the access token has already expired — the usual case for a user who was
+        // idle. The token is therefore read here with its signature verified but its expiry ignored.
+        const header = req.headers.authorization || '';
+        const token = header.startsWith('Bearer ') ? header.slice(7) : req.cookies?.token;
+        let claims = null;
+        if (token) {
+            try {
+                claims = jwt.verify(token, getJwtSecret(), { ignoreExpiration: true });
+            } catch {
+                claims = null; // forged or malformed: it identifies nothing to revoke
+            }
         }
 
+        // The refresh token names the session as well, so the session ends even without a usable access token.
         const raw = req.cookies?.rfsh;
+        let refreshRow = null;
         if (raw) {
             const hash = crypto.createHash('sha256').update(raw).digest('hex');
+            refreshRow = await redisGet(`rfsh:${hash}`);
             await redisDel(`rfsh:${hash}`);
+        }
+
+        const userId = claims?.sub || refreshRow?.userId || null;
+        for (const sessionId of new Set([claims?.sid, refreshRow?.sessionId].filter(Boolean))) {
+            await sessionService.revokeSession(sessionId, userId);
         }
         clearAuthCookies(res);
 
-        if (req.user?.id) {
-            await cacheManager.del(`user:profile:${req.user.id}`);
+        if (userId) {
+            await cacheManager.del(`user:profile:${userId}`);
         }
 
-        // Block the presented access token for the rest of its lifetime (header or cookie).
-        const header = req.headers.authorization || '';
-        const token = header.startsWith('Bearer ') ? header.slice(7) : req.cookies?.token;
-        if (token) {
-            const decoded = jwt.decode(token);
-            if (decoded?.exp) {
-                const { blockToken } = require('../lib/tokenBlocklist');
-                await blockToken(token, decoded.exp);
-            }
+        // Block a still-valid access token for the rest of its lifetime.
+        if (claims?.exp && claims.exp * 1000 > Date.now()) {
+            const { blockToken } = require('../lib/tokenBlocklist');
+            await blockToken(token, claims.exp);
         }
 
         return res.json({ success: true });

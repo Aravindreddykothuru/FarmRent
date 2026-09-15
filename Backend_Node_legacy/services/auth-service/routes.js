@@ -78,7 +78,8 @@ router.post('/register', loginLimiter, validate(registerSchema), register);
 router.post('/login', loginLimiter, validate(loginSchema), login);
 router.get('/me', auth(true), me);
 router.post('/refresh', refreshAccessToken);
-router.post('/logout', auth(false), logout);
+// No auth middleware: signing out must also work once the access token has expired (see the controller).
+router.post('/logout', logout);
 
 // ── Email verification ────────────────────────────────────────────────────────
 router.post('/verify-email', validate(require('zod').z.object({ token: require('zod').z.string().min(1) })), verifyEmail);

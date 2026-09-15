@@ -110,6 +110,25 @@ describe('authentication', () => {
         await request(getApp()).get('/api/v1/bookings/incoming').set('Authorization', `Bearer ${accessToken}`).expect(401);
     });
 
+    test('logout after the access token has expired still ends the session and revokes the refresh token', async () => {
+        // An idle user's 15-minute access token has usually expired by the time they click Sign Out.
+        const jwt = require('jsonwebtoken');
+        const { getJwtSecret } = require('../../lib/jwtSecret');
+        const user = await createUser('farmer');
+        const loginRes = await request(getApp()).post('/api/v1/auth/login').send({ email: user.email, password: PASSWORD }).expect(200);
+        const refresh = cookieValue(loginRes, 'rfsh');
+        const { iat: _iat, exp: _exp, ...claims } = jwt.decode(cookieValue(loginRes, 'token'));
+        const expired = jwt.sign({ ...claims, iat: Math.floor(Date.now() / 1000) - 3600 }, getJwtSecret(), { expiresIn: -60 });
+
+        const out = await request(getApp()).post('/api/v1/auth/logout').set('Cookie', `token=${expired}; rfsh=${refresh}`);
+        expect(out.status).toBe(200);
+        const cleared = (out.headers['set-cookie'] || []).map((c) => c.split('=')[0]);
+        expect(cleared).toEqual(expect.arrayContaining(['token', 'rfsh', 'authRole']));
+
+        // The refresh token must not be able to resurrect the session.
+        await request(getApp()).post('/api/v1/auth/refresh').set('Cookie', `rfsh=${refresh}`).expect(401);
+    });
+
     test('switching between farmer and owner mode re-issues the token and never touches the roles table', async () => {
         const user = await createUser('farmer');
         const agent = await login(user);
