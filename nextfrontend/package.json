@@ -7,6 +7,7 @@
     "dev:direct": "node server.js",
     "dev:next-only": "next dev",
     "build": "next build",
+    "lint": "eslint .",
     "start": "cross-env NODE_ENV=production node server.js",
     "ui:smoke": "node scripts/ui-smoke.mjs",
     "check:links": "node scripts/check-links.cjs"
