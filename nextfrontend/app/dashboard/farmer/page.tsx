@@ -200,7 +200,8 @@ export default function FarmerDashboard() {
         { href: '/browse',   icon: Search,  label: t('nav.browse'),   color: 'bg-green-50 text-green-700 hover:bg-green-100' },
         { href: '/wishlist', icon: Heart,   label: t('nav.wishlist'), color: 'bg-red-50 text-red-600 hover:bg-red-100' },
         { href: '/offers',   icon: Tag,     label: t('nav.offers'),   color: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100' },
-        { href: '/reviews',  icon: Star,    label: t('dashboard.reviews'), color: 'bg-amber-50 text-amber-700 hover:bg-amber-100' },
+        // Reviews are written from a completed rental's page, so this opens the bookings list.
+        { href: '/bookings', icon: Star,    label: t('dashboard.reviews'), color: 'bg-amber-50 text-amber-700 hover:bg-amber-100' },
     ];
 
     return (

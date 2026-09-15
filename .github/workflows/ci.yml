@@ -68,6 +68,7 @@ jobs:
       - run: npm ci --legacy-peer-deps
       - run: npm run lint
       - run: npx tsc --noEmit
+      - run: npm run check:links
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1

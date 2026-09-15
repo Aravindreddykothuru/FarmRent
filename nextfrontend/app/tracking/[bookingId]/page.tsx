@@ -233,7 +233,7 @@ export default function LiveTrackingPage() {
                 {booking.status === 'completed' && (
                     <button
                         type="button"
-                        onClick={() => router.push(`/tracking/${bookingId}/history`)}
+                        onClick={() => router.push(`/dashboard/bookings/${bookingId}/location-history`)}
                         aria-label="Replay trip history"
                         className="pointer-events-auto p-2.5 bg-white rounded-full shadow-lg hover:bg-gray-50 transition-colors"
                     >
