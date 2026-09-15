@@ -1,359 +1,205 @@
 # FarmRent — Farm Equipment Rental Platform
 
-A full-stack platform that connects farmers with equipment owners for renting tractors, harvesters, and other farm machinery. Built with Next.js 16, Express, Supabase, Razorpay, and Socket.IO.
+FarmRent connects farmers who need machinery (tractors, harvesters, sprayers, threshers) with owners who rent it out. Owners list equipment with a daily rate, deposit and pickup point; renters request dates; owners confirm, hand over and close the rental with a code the renter shows them. Payments are cash on delivery or Razorpay.
 
 ---
 
 ## Architecture
 
 ```
-Browser / Mobile
-      │
-      ▼
-┌─────────────────────────────────────────────────────────┐
-│           Unified Server  (nextfrontend/server.js)       │
-│                 One process · One port (3000)            │
-│                                                          │
-│  /api/*  ─────────────────────► Express Backend         │
-│  /socket.io/*  ────────────────► Socket.IO              │
-│  /uploads/*  ──────────────────► Static files           │
-│  /* (everything else) ─────────► Next.js App Router     │
-└──────────┬──────────────────────────────────┬───────────┘
-           │                                  │
-           ▼                                  ▼
-    ┌─────────────┐                  ┌──────────────────┐
-    │  Supabase   │                  │  Redis (optional)│
-    │ (PostgreSQL)│                  │  Driver geo-     │
-    │  Database   │                  │  search + rate   │
-    │  Realtime   │                  │  limiting        │
-    └─────────────┘                  └──────────────────┘
-           │
-    ┌──────┴──────────────────────────────────────────────┐
-    │  External Services                                   │
-    │  • Razorpay   — UPI / card payments + webhooks      │
-    │  • Resend / Brevo / Gmail — transactional email     │
-    │  • MSG91 / Twilio — SMS OTP                         │
-    └─────────────────────────────────────────────────────┘
+Browser (Next.js pages, Socket.IO client)
+        │  one origin, one port (3000)
+        ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Unified server — nextfrontend/server.js                     │
+│    /api/v1/*, /api/payment/*, /health, /metrics → Express    │
+│    /socket.io  (namespaces /tracking, /notifications)        │
+│    everything else → Next.js App Router                      │
+└───────────────┬──────────────────────────────┬───────────────┘
+                │ supabase-js (service role)   │
+                ▼                              ▼
+     PostgREST (Supabase, or the local        Redis
+     gateway on :54321) → Postgres + PostGIS  sessions, refresh tokens,
+     RLS on every table; only the API's       rate limits, caches, queues,
+     service role can read or write           Socket.IO adapter
 ```
 
-### Key Design Decision — Unified Server
+- **One process** serves pages, the REST API and websockets, so the browser never needs a separate API URL.
+- **Business rules live on the server**: prices are computed from the listing (the client's amounts are ignored), the rental state machine is enforced by conditional updates, and a Postgres exclusion constraint makes double-booking impossible even under concurrent requests.
+- **Auth**: short-lived JWT access token (15 min) in an httpOnly cookie, rotating refresh token stored hashed in Redis with reuse detection, server-side session list with remote sign-out.
 
-`nextfrontend/server.js` starts a single Node.js process that serves both Next.js pages and the Express REST API on the same port. There is **no separate backend process** in production.
+### Rental lifecycle
 
-```
-Request comes in
-  if /api/* or /socket.io/* or /health → Express handles it
-  else                                 → Next.js handles it
-```
+| Action | From | To | Who |
+|---|---|---|---|
+| request | — | `requested` (shown as *pending*) | renter |
+| accept | requested | `approved` (*confirmed*) | owner, admin |
+| reject | requested | `rejected` | owner, admin |
+| cancel | requested, approved | `cancelled` | renter, owner, admin |
+| start (hand over) | approved | `active` (*in progress*) | owner, driver, admin |
+| return | active | `return_pending` | renter |
+| complete | active, return_pending | `completed` | owner or driver with the renter's 6-digit completion code; admin |
 
-This means:
-- One Railway service, one port, one deploy
-- Next.js API routes (`/app/api/...`) and Express routes (`/api/v1/...`, `/api/payment/...`) coexist
-- `Backend/.env` is the single source of truth for all environment variables
+Requests, confirmed and active rentals block their dates; an overlapping request is refused with `409 BOOKING_CONFLICT`.
 
 ---
 
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 16 (App Router), React 19, Tailwind CSS, shadcn/ui |
-| Backend | Node.js 20, Express 4 |
-| Database | Supabase (PostgreSQL + Realtime) |
-| Auth | Custom JWT (access 15min + refresh 7d), email OTP |
-| Payments | Razorpay — UPI, cards, netbanking, wallets + COD fallback |
-| Real-time | Socket.IO (notifications + GPS tracking) |
-| Cache | Redis (driver geosearch, rate limiting, OTP) |
-| Email | Multi-provider: Resend → Brevo → Gmail SMTP → Ethereal |
-| GPS | Supabase Realtime + Socket.IO + OSRM routing |
-| Deploy | Railway (Docker), GitHub Actions CI |
+| Web app | Next.js 16 (App Router), React 19, Tailwind CSS, shadcn/ui |
+| API | Node.js 20, Express 4, Zod validation, Socket.IO 4 |
+| Database | PostgreSQL 15 + PostGIS via PostgREST (Supabase-compatible); SQL migrations in `Backend_Node_legacy/db/migrations` |
+| Cache / sessions | Redis 7 |
+| Payments | Razorpay (optional) + cash on delivery |
+| Tests | Jest + Supertest (unit, integration, API contract), HTTP acceptance script, Playwright-driven browser smoke |
+| CI | GitHub Actions (`.github/workflows/ci.yml`) |
 
 ---
 
-## Project Structure
+## Repository layout
 
 ```
-farmers/
-├── Dockerfile              ← Production Docker image (unified server)
-├── railway.toml            ← Railway deployment config
-├── docker-compose.yml      ← Local dev with Redis + app
-│
-├── Backend/                ← Express REST API
-│   ├── app.js              ← Express app factory
-│   ├── server.js           ← Standalone backend entry (dev only)
-│   ├── .env                ← All environment variables (gitignored)
-│   ├── .env.example        ← Template — copy to .env
-│   │
-│   ├── routes/             ← API route handlers
-│   │   ├── payment.js      ← Razorpay create-order, verify, webhook, refund
-│   │   ├── machines.js     ← Equipment CRUD + search
-│   │   ├── messages.js     ← Chat messages
-│   │   ├── reviews.js      ← Equipment reviews
-│   │   ├── notifications.js
-│   │   ├── offers.js       ← Price negotiation
-│   │   ├── disputes.js
-│   │   ├── kyc.js
-│   │   └── ...
-│   │
-│   ├── services/           ← Modular microservice-style handlers
-│   │   ├── auth-service/   ← Register, login, OTP, password reset
-│   │   ├── booking-service/← Create booking, driver assignment, routing
-│   │   ├── equipment-service/
-│   │   ├── tracking-service/ ← Socket.IO + Redis geo
-│   │   ├── user-service/   ← Profile, avatar upload
-│   │   ├── driver-service/ ← Driver registration and location
-│   │   └── routing-service/ ← OSRM route calculation
-│   │
-│   ├── lib/
-│   │   ├── supabase.js     ← Supabase client (service role)
-│   │   ├── emailService.js ← Multi-provider email
-│   │   ├── otpService.js   ← SMS + in-memory OTP
-│   │   ├── notificationService.js ← Push via Socket.IO
-│   │   └── refundService.js ← Razorpay refunds
-│   │
-│   └── supabase/
-│       ├── schema.sql      ← Full DB schema
-│       └── migrations/
-│           └── FIX_run_this_in_supabase.sql  ← Run once in Supabase SQL Editor
-│
-└── nextfrontend/           ← Next.js 16 App Router frontend
-    ├── server.js           ← UNIFIED SERVER ENTRY POINT (production + dev)
-    ├── next.config.ts
-    │
-    ├── app/                ← Next.js pages (App Router)
-    │   ├── page.tsx            ← Home / browse equipment
-    │   ├── browse/             ← Equipment search with filters
-    │   ├── equipment/[id]/     ← Equipment detail
-    │   ├── book/[machineId]/   ← Booking form + Razorpay / COD payment
-    │   ├── bookings/           ← My bookings list
-    │   ├── bookings/[id]/      ← Booking detail + tracking
-    │   ├── payment/success/    ← Payment confirmation (Razorpay + COD)
-    │   ├── dashboard/
-    │   │   ├── farmer/         ← Farmer dashboard
-    │   │   ├── owner/          ← Equipment owner dashboard
-    │   │   ├── driver/         ← Driver dashboard
-    │   │   └── admin/          ← Admin panel
-    │   ├── tracking/[bookingId]/ ← Live GPS map
-    │   ├── chats/              ← Messaging
-    │   ├── wallet/             ← Wallet & transactions
-    │   ├── login/ register/ forgot-password/ ← Auth
-    │   └── api/tracking/update/ ← GPS update endpoint (Next.js route)
-    │
-    ├── components/
-    │   ├── TrackingMap.tsx     ← Leaflet real-time map
-    │   ├── BookingChat.tsx     ← In-booking chat
-    │   ├── NotificationBell.tsx ← Real-time socket notifications
-    │   ├── DriverInfoCard.tsx  ← Assigned driver + ETA
-    │   └── ...
-    │
-    ├── hooks/
-    │   ├── useRazorpay.ts      ← Razorpay SDK integration
-    │   ├── useTrackingSocket.ts
-    │   └── useDriverGPS.ts
-    │
-    └── context/
-        ├── AuthContext.tsx     ← JWT auth state
-        └── LanguageContext.tsx ← i18n (10 Indian languages)
+docker-compose.yml          local stack: Postgres/PostGIS, PostgREST + gateway, Redis (+ app profile)
+Dockerfile                  production image of the unified app
+scripts/setup-local-env.js  generates local env files with fresh secrets
+infra/local/                gateway config and database role bootstrap for the local stack
+Backend_Node_legacy/        Express API
+  app.js                    routes, security middleware, rate limits
+  services/ routes/         feature routers (bookings, payments, machines, auth, …)
+  db/migrate.js             migration runner (checksummed, idempotent)
+  db/migrations/            SQL schema
+  db/seed.js                demo data (refuses to run in production)
+  __tests__/                unit + integration tests, incl. api-contract.test.js
+  scripts/e2e-acceptance.js end-to-end acceptance run over HTTP
+nextfrontend/               Next.js app and the unified server
+  server.js                 entry point (dev and production)
+  proxy.ts                  sign-in redirects for protected pages
+  scripts/ui-smoke.mjs      browser smoke test
 ```
+
+Other top-level folders (`frontend/`, `agronexus-springboot/`, `FutureEnhancement/`, `GPS/`) are experiments that are not part of the running application.
 
 ---
 
-## Database Schema (Supabase)
+## Run it locally
 
-```
-users              — accounts (custom auth, not Supabase Auth)
-equipment          — listings (owner, location, price, images)
-bookings           — rental records with driver assignment + GPS lifecycle
-payments           — Razorpay payment records + COD
-drivers            — driver profiles + real-time location
-equipment_tracking — GPS breadcrumb trail
-notifications      — in-app notifications (Socket.IO)
-messages / chats   — equipment + booking messaging
-reviews            — equipment ratings
-disputes           — booking dispute resolution
-kyc_documents      — Aadhaar / license verification
-promo_codes        — discount codes
-favorites          — user wishlists
-offers             — price negotiation between farmer and owner
-refresh_tokens     — JWT refresh token store
-```
-
-**First-time Supabase setup:** Run `Backend/supabase/migrations/FIX_run_this_in_supabase.sql` in Supabase Dashboard → SQL Editor. It's idempotent (safe to re-run).
-
----
-
-## Payment Flow
-
-```
-Farmer selects equipment
-       │
-       ├── Razorpay (UPI / card / netbanking / wallet)
-       │     1. POST /api/payment/create-order → Razorpay order
-       │     2. Razorpay checkout in browser
-       │     3. POST /api/payment/verify → HMAC verify → mark paid
-       │     4. Booking status → confirmed, payment_status → paid
-       │     5. Webhook (/api/payment/webhook) as backup confirmation
-       │
-       └── Cash on Delivery
-             1. Booking created with payment_method = 'cod'
-             2. Redirect to /payment/success?method=cod
-             3. Payment collected when equipment arrives
-```
-
-Razorpay test keys work for development. For real money use `rzp_live_*` keys.
-
----
-
-## Real-time Features (Socket.IO)
-
-| Namespace | Events | Purpose |
-|---|---|---|
-| `/notifications` | `notification` | Booking updates, payment alerts |
-| `/tracking` | `location:update`, `driver:assigned` | Live equipment GPS |
-
----
-
-## Quick Start (Local Development)
-
-### Prerequisites
-- Node.js 20+
-- A free [Supabase](https://supabase.com) project
-- Razorpay test account keys
-
-### 1. Clone and install
+Prerequisites: **Node.js 20+** and **Docker** with Compose v2.
 
 ```bash
-git clone https://github.com/Aravindreddykothuru/FarmRent.git
-cd FarmRent
+# 1. Generate local secrets: .env (Docker stack) and Backend_Node_legacy/.env (app)
+npm run setup:env
 
-# Backend dependencies
-cd Backend && npm install
+# 2. Start Postgres, the PostgREST gateway and Redis
+npm run stack:up
 
-# Frontend dependencies
-cd ../nextfrontend && npm install
-```
+# 3. Install dependencies
+npm run install:all
 
-### 2. Configure environment
+# 4. Create the schema and load demo data
+npm run migrate
+npm run seed
 
-```bash
-cd Backend
-cp .env.example .env
-# Edit .env — fill in SUPABASE_URL, SUPABASE_SERVICE_KEY, JWT_SECRET,
-#              RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
-```
-
-### 3. Set up database
-
-Open Supabase Dashboard → SQL Editor → New Query, paste the contents of:
-```
-Backend/supabase/migrations/FIX_run_this_in_supabase.sql
-```
-Click **Run**.
-
-### 4. Start the app (single command)
-
-```bash
-cd nextfrontend
+# 5. Start the app (pages + API + websockets)
 npm run dev
-# → http://localhost:3002  (both UI and API)
 ```
 
-### 5. Optional: Redis (for driver geo-tracking + rate limiting)
+Open http://localhost:3000. Host ports default to 55432 (Postgres), 54321 (gateway), 6380 (Redis) and 3000 (app); change them in `.env` if they clash with something else.
+
+**Demo accounts** (created by `npm run seed`, development only; password `FarmRent@2026` unless `SEED_PASSWORD` is set):
+
+| Role | Email |
+|---|---|
+| Admin | admin@farmrent.local |
+| Owner | owner1@farmrent.local, owner2@farmrent.local |
+| Renter | farmer1@farmrent.local, farmer2@farmrent.local |
+
+In development, registration and login OTPs are returned in the API response (`devOtp`) and logged by the server, and every email the app sends can be read at http://localhost:3000/dev/emails. Neither happens in production.
+
+---
+
+## Tests
+
+| Command | What it checks | Needs |
+|---|---|---|
+| `npm run test:unit` | pricing, rental state machine, validation schemas | nothing |
+| `npm run test:integration` | auth (register, login, refresh rotation, logout, rate limits), bookings (overlaps, lifecycle), listings, and `api-contract.test.js`: every mounted route called with a valid and an invalid request, failing if a route has no check | local stack, migrated |
+| `npm test` | both of the above | local stack |
+| `npm run test:e2e` | the full rental journey over HTTP: register, list, search, quote, request, overlap refusal, confirm, hand over, return, complete, history, logout, admin | app running in development mode on :3000, seeded |
+| `npm run test:ui` | every page in Chrome as visitor, renter, owner and admin (console errors, failed requests, redirects), the rental journey through the UI, phone-width layout, sign-out | app running on :3000, seeded, Chrome or Edge installed |
+| `npm run lint` / `npm run typecheck` | ESLint for both apps, TypeScript for the web app | — |
+
+The integration tests refuse to run against a non-local database.
+
+---
+
+## Production build
 
 ```bash
-docker run -d -p 6379:6379 redis:7-alpine
-# Set REDIS_URL=redis://127.0.0.1:6379 in Backend/.env
+npm run build
+npm start
 ```
 
----
+`npm start` runs the unified server with `NODE_ENV=production` on port 3000 (`PORT` overrides it). It reads configuration from `Backend_Node_legacy/.env` or the file named by `FARMRENT_ENV_FILE`.
 
-## Environment Variables
+Everything in containers, against the local stack:
 
-All variables live in `Backend/.env`. See `Backend/.env.example` for the full list.
+```bash
+docker compose --profile app up --build
+```
 
-| Variable | Required | Description |
-|---|---|---|
-| `SUPABASE_URL` | Yes | Supabase project URL |
-| `SUPABASE_SERVICE_KEY` | Yes | Supabase service role key (secret) |
-| `JWT_SECRET` | Yes | Access token signing key |
-| `JWT_REFRESH_SECRET` | Yes | Refresh token signing key |
-| `RAZORPAY_KEY_ID` | Yes | `rzp_test_*` or `rzp_live_*` |
-| `RAZORPAY_KEY_SECRET` | Yes | Razorpay secret |
-| `RAZORPAY_WEBHOOK_SECRET` | Prod | Razorpay webhook verification |
-| `APP_URL` | Yes | Public URL (e.g. `https://your-app.up.railway.app`) |
-| `ALLOWED_ORIGINS` | Yes | CORS allowed origins (comma-separated) |
-| `RESEND_API_KEY` | Email | Resend API key (recommended) |
-| `BREVO_SMTP_USER` | Email | Brevo SMTP fallback |
-| `SMTP_HOST/USER/PASS` | Email | Gmail SMTP fallback |
-| `REDIS_URL` | Optional | Redis connection string |
-| `PORT` | Auto | Set by Railway automatically |
+### Deploying
+
+- Build the image from `Dockerfile`. Browser-visible settings (`NEXT_PUBLIC_*`) are build arguments; server secrets are runtime environment variables and never enter the image (`.dockerignore` excludes every `.env` file).
+- Required runtime variables: `JWT_SECRET`, `JWT_REFRESH_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `REDIS_URL`, `APP_URL`, `ALLOWED_ORIGINS` (your real domains only), `CLIENT_URL`. Set `TRUST_PROXY=1` behind a load balancer so rate limits see client IPs.
+- Apply database migrations deliberately before releasing code that needs them — back up first, then from `Backend_Node_legacy`: `DATABASE_URL=<production connection string> npm run migrate`. The runner records checksums in `schema_migrations`, takes an advisory lock and skips migrations that are already applied. The deploy workflow never migrates on its own.
+- `.github/workflows/production-deploy.yml` runs the full CI, builds and pushes the image to ECR and rolls out to EKS.
 
 ---
 
-## Deployment (Railway)
+## Configuration
 
-1. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub repo
-2. Select `Aravindreddykothuru/FarmRent`
-3. Railway auto-detects `Dockerfile` and `railway.toml`
-4. Add a **Redis** addon: New → Database → Redis (Railway sets `REDIS_URL` automatically)
-5. Go to **Variables** tab, add all required env vars from the table above
-6. Set `APP_URL` and `CLIENT_URL` and `ALLOWED_ORIGINS` to your Railway public domain
-7. Click **Deploy**
-
-Build takes ~3-5 minutes (installs deps + Next.js build). Health check: `GET /health`
+| File | Used by |
+|---|---|
+| `.env.example` | Docker Compose (local stack ports and secrets) |
+| `Backend_Node_legacy/.env.example` | the app and backend scripts — every server setting, with what is required and what each optional integration does without configuration |
+| `nextfrontend/.env.example` | optional web-build overrides (`NEXT_PUBLIC_*`) |
 
 ---
 
-## API Reference
+## API
 
-### Auth
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/auth/register` | Register + email OTP sent |
-| POST | `/api/v1/auth/verify-otp` | Verify OTP → get JWT |
-| POST | `/api/v1/auth/login` | Login with email + password |
-| POST | `/api/v1/auth/refresh` | Refresh access token |
-| POST | `/api/v1/auth/forgot-password` | Send reset email |
+All JSON responses share one envelope:
 
-### Equipment
-| Method | Path | Description |
-|---|---|---|
-| GET  | `/api/v1/machines` | List/search equipment |
-| POST | `/api/v1/machines` | Add listing (owner) |
-| GET  | `/api/v1/machines/:id` | Equipment detail |
-| PUT  | `/api/v1/machines/:id` | Update listing |
+```json
+{ "success": true, "data": { }, "error": null, "timestamp": "…", "requestId": "…" }
+```
 
-### Bookings
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/bookings` | Create booking (auto-assigns driver) |
-| GET  | `/api/v1/bookings` | My bookings |
-| GET  | `/api/v1/bookings/:id` | Booking detail |
-| PATCH | `/api/v1/bookings/:id/status` | Update booking status |
+Errors carry `error.code` (for example `VALIDATION_ERROR`, `INVALID_CREDENTIALS`, `BOOKING_CONFLICT`, `INVALID_TRANSITION`) and a readable `error.message`.
 
-### Payments
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/payment/create-order` | Create Razorpay order |
-| POST | `/api/payment/verify` | Verify + confirm payment |
-| GET  | `/api/payment/status?orderId=` | Poll payment status |
-| POST | `/api/payment/refund` | Initiate refund |
-| POST | `/api/payment/webhook` | Razorpay webhook handler |
+| Area | Main endpoints |
+|---|---|
+| Auth | `POST /api/v1/auth/reg-email-send-otp`, `…/reg-email-verify-otp`, `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`, `GET /api/v1/auth/sessions`, password reset |
+| Listings | `GET /api/v1/machines`, `GET /api/v1/machines/:id`, `GET /api/v1/machines/nearby`, `POST/PATCH/DELETE /api/v1/machines/:id` (owner), `GET /api/v1/search/*` |
+| Bookings | `GET /api/v1/bookings/quote`, `POST /api/v1/bookings`, `GET /api/v1/bookings/my`, `GET /api/v1/bookings/incoming`, `GET /api/v1/bookings/:id`, `PATCH …/accept \| reject \| cancel \| start`, `POST …/return`, `POST …/complete`, extensions, availability |
+| Payments | `POST /api/payment/create-order`, `POST /api/payment/verify`, `POST /api/payment/webhook`, refunds |
+| People & trust | profile, addresses, KYC, reviews, favorites, offers, chats, disputes, notifications |
+| Tracking | Socket.IO `/tracking` rooms (booking parties only), `GET /api/v1/tracking/booking/:id/*` |
+| Admin | `GET /api/v1/admin/dashboard`, users, bookings, listing moderation (`PATCH /api/v1/admin/machines/:id/approve \| reject`) |
+| Public | `GET /api/v1/stats` (landing-page totals), `GET /health`, `GET /health/full` |
 
-### Tracking
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/tracking/update` | Emit GPS location (Socket.IO) |
-| GET  | `/api/v1/tracking/:bookingId` | Current position |
-| GET  | `/api/v1/tracking/:bookingId/history` | GPS breadcrumbs |
+The executable reference is `Backend_Node_legacy/__tests__/integration/api-contract.test.js`; interactive docs are served at `/api-docs`.
+
+Rate limits: credential endpoints (login, register, password reset, OTP) 20 requests per 15 minutes per IP and path; everything else 120 per minute per path; booking requests 3 per minute per user.
 
 ---
 
-## Supported Languages
+## Troubleshooting
 
-English · Hindi · Telugu · Tamil · Kannada · Malayalam · Gujarati · Marathi · Punjabi · Bengali
-
----
+- **Port already in use** — another Postgres or Redis on the default ports: set `DB_PORT`, `REDIS_PORT`, `SUPABASE_GATEWAY_PORT` or `APP_PORT` in `.env`, then re-run `npm run setup:env -- --force` so the app's env file matches.
+- **`EPERM` on `.next` during a build on Windows** — a sync client (for example OneDrive) is holding files: delete `nextfrontend/.next` and build again.
+- **Peer dependency errors on install** — install with `--legacy-peer-deps` (the `install:all` script does).
 
 ## License
 

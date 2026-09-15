@@ -17,6 +17,15 @@ venv/
 .next/
 dist/
 build/
+agronexus-springboot/target/
+
+# Test output
+coverage/
+test-results/
+playwright-report/
+
+# Local databases (the legacy Python prototype's SQLite file)
+app.db
 
 # Logs
 *.log
@@ -30,3 +39,8 @@ Thumbs.db
 .idea/
 *.suo
 *.user
+
+# Superseded code and ad-hoc scripts kept locally for reference (not part of the app)
+_archive/
+# Local debugging scripts (some embed real local secrets) — never commit
+scratch/
