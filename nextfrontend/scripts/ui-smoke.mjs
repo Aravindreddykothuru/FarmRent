@@ -369,10 +369,19 @@ async function main() {
                 const { page } = renter;
                 await gotoSettled(page, '/dashboard/farmer');
                 await page.getByRole('button', { name: 'User account menu' }).click();
-                await Promise.all([
-                    page.waitForURL((url) => url.pathname === '/login', { timeout: NAV_TIMEOUT }),
-                    page.getByRole('menuitem', { name: /Sign Out/ }).click(),
-                ]);
+                const logoutResponse = page
+                    .waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/auth/logout', { timeout: 30_000 })
+                    .catch(() => null);
+                await page.getByRole('menuitem', { name: /Sign Out/ }).click();
+                const logout = await logoutResponse;
+                try {
+                    await page.waitForURL((url) => url.pathname === '/login', { timeout: 30_000 });
+                } catch {
+                    const left = (await renter.context.cookies()).filter((c) => ['token', 'rfsh', 'authRole'].includes(c.name));
+                    const body = logout ? (await logout.text().catch(() => '')).slice(0, 160) : '';
+                    throw new Error(`still on ${new URL(page.url()).pathname} after sign-out; logout API ${logout ? `HTTP ${logout.status()} ${body}` : 'never called'}; `
+                        + `session cookies left: ${left.map((c) => c.name).join(', ') || 'none'}`);
+                }
                 const me = await page.request.get(`${BASE_URL}/api/v1/auth/me`);
                 if (me.status() !== 401) throw new Error(`/auth/me after sign-out returned ${me.status()}`);
                 await gotoSettled(page, '/bookings');
