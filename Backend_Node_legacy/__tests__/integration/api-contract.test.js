@@ -423,11 +423,27 @@ describe('API contract — every mounted route', () => {
         await check('PATCH /api/v1/messages/:bookingId/read', ownerAgent.patch(`/api/v1/messages/${booking.id}/read`), 200);
         await check('PATCH /api/v1/messages/:bookingId/read', strangerAgent.patch(`/api/v1/messages/${booking.id}/read`), 404);
 
-        // Payments: the local stack has no Razorpay keys, so gateway operations fail cleanly with 503.
+        // Payments: a booking is payable only once the owner has confirmed it, and the local stack has no
+        // Razorpay keys, so the gateway call itself then fails cleanly with 503.
         const idem = () => ({ 'Idempotency-Key': `contract-${Date.now()}-${Math.random().toString(36).slice(2)}` });
         await check(
             'POST /api/payment/create-order',
             renterAgent.post('/api/payment/create-order').set(idem()).send({ bookingId: booking.id }),
+            409,
+            'BOOKING_NOT_PAYABLE',
+        );
+        await resetRateLimits();
+        const payable = await check(
+            'POST /api/v1/bookings',
+            renterAgent
+                .post('/api/v1/bookings')
+                .send({ machineId: equipmentId, startDate: isoDate(140), endDate: isoDate(141), paymentMethod: 'razorpay' }),
+            201,
+        );
+        await check('PATCH /api/v1/bookings/:id/accept', ownerAgent.patch(`/api/v1/bookings/${payable.id}/accept`), 200);
+        await check(
+            'POST /api/payment/create-order',
+            renterAgent.post('/api/payment/create-order').set(idem()).send({ bookingId: payable.id }),
             503,
             'PAYMENTS_UNAVAILABLE',
         );

@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
     ChevronLeft, Loader2, MapPin, Calendar, Clock,
     Star, CheckCircle2, XCircle, AlertCircle, Download,
-    RotateCcw, Share2, KeyRound, Navigation, Truck, Undo2,
+    RotateCcw, Share2, KeyRound, Navigation, Truck, Undo2, CreditCard,
 } from 'lucide-react';
 import { nodeApi, invoicesApi, razorpayApi } from '@/lib/api';
 import { connectTrackingSocket } from '@/lib/socket';
@@ -20,6 +20,7 @@ import DisputeForm from '@/components/DisputeForm';
 import BookingPass from '@/components/BookingPass';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { useRazorpay } from '@/hooks/useRazorpay';
 import dynamic from 'next/dynamic';
 
 const PickupLocationReveal = dynamic(
@@ -113,6 +114,8 @@ export default function BookingDetailPage() {
     const [showCompletionOtp,  setShowCompletionOtp] = useState(false);
     const [completionOtp,      setCompletionOtp]     = useState('');
     const [completingWork,     setCompletingWork]    = useState(false);
+
+    const { startCheckout, loading: paying } = useRazorpay();
 
     const isOwner  = Boolean(user && booking && booking.owner_id === user.id);
     const isRenter = Boolean(user && booking && booking.renter_id === user.id);
@@ -444,6 +447,29 @@ export default function BookingDetailPage() {
                             <Navigation className="h-4 w-4" /> Track Live Location
                         </Button>
                     </Link>
+                )}
+
+                {/* Online payment happens only after the owner confirms — the server refuses an order before that */}
+                {isRenter && booking.status === 'confirmed' && booking.paymentMethod !== 'cod' && booking.paymentStatus !== 'paid' && (
+                    <Button
+                        className="w-full bg-green-700 hover:bg-green-800 rounded-xl gap-2 font-bold"
+                        disabled={paying}
+                        onClick={() => startCheckout({
+                            bookingId,
+                            user: {
+                                full_name: user?.name ?? '',
+                                email: user?.email ?? '',
+                                phone: (user as { phone?: string | null } | null)?.phone ?? '',
+                            },
+                            onSuccess: () => {
+                                toast.success('Payment received');
+                                loadBooking().catch((e: unknown) => toast.error(errorMessage(e, 'Could not refresh the booking')));
+                            },
+                        })}
+                    >
+                        {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                        {t('booking.payNow')} · {inr(booking.totalAmount)}
+                    </Button>
                 )}
 
                 {/* ── Owner actions ── */}

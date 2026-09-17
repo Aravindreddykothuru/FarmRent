@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const request = require('supertest');
 const { getApp, resetRateLimits, isoDate, createUser, login, createEquipment, withDb } = require('./helpers');
 
@@ -173,6 +174,26 @@ describe('bookings', () => {
         await ownerAgent.post('/api/v1/reviews').send({ bookingId: created.id, rating: 5 }).expect(403);
         await renterAgent.post('/api/v1/reviews').send({ bookingId: created.id, rating: 4, comment: 'Worked well' }).expect(201);
         await renterAgent.post('/api/v1/reviews').send({ bookingId: created.id, rating: 4 }).expect(409);
+    });
+
+    test('an online booking is payable only after the owner confirms, and is not handed over unpaid', async () => {
+        const created = (await book(renterAgent, equipmentId, isoDate(130), isoDate(131), { paymentMethod: 'razorpay' }).expect(201)).body
+            .data;
+        const path = `/api/v1/bookings/${created.id}`;
+        const order = () =>
+            renterAgent.post('/api/payment/create-order').set('Idempotency-Key', crypto.randomUUID()).send({ bookingId: created.id });
+
+        // While the owner is still deciding, there is nothing to pay for: refused before any gateway call.
+        expect((await order().expect(409)).body.error.code).toBe('BOOKING_NOT_PAYABLE');
+
+        await ownerAgent.patch(`${path}/accept`).expect(200);
+        // Confirmed: the booking now passes the gate and fails only because this stack has no Razorpay keys.
+        expect((await order().expect(503)).body.error.code).toBe('PAYMENTS_UNAVAILABLE');
+
+        // The equipment is not handed over until the money is in.
+        expect((await ownerAgent.patch(`${path}/start`).expect(409)).body.error.code).toBe('PAYMENT_REQUIRED');
+        await withDb((db) => db.query("UPDATE equipment_rentals SET payment_status = 'paid' WHERE id = $1", [created.id]));
+        expect((await ownerAgent.patch(`${path}/start`).expect(200)).body.data.status).toBe('in_progress');
     });
 
     test('cancelling frees the dates; declining is the owner-only exit from a request', async () => {

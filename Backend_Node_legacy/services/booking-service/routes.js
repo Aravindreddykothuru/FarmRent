@@ -636,7 +636,14 @@ router.patch(
     '/:id/start',
     auth(true),
     asyncHandler(async (req, res) => {
-        const { updated, client } = await applyTransition(req, 'start');
+        const { updated, client } = await applyTransition(req, 'start', {
+            // An online booking is handed over only once the money is in; cash bookings are paid on delivery.
+            verify: (booking) => {
+                if (booking.payment_method === 'razorpay' && booking.payment_status !== 'paid') {
+                    throw new BookingError(409, 'PAYMENT_REQUIRED', 'The renter has not paid for this booking yet.');
+                }
+            },
+        });
         notify(updated.renter_id, {
             type: 'booking_update',
             title: 'Rental Started',

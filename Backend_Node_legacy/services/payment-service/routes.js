@@ -2,8 +2,9 @@
  * Razorpay payments — /api/payment
  *
  * - The amount charged is always the booking's server-computed total_amount; clients only name the booking.
- * - Paying marks payment_status = paid. It does not confirm the booking: the owner still accepts it
- *   (booking-service/lifecycle.js), and rejecting or cancelling a paid booking refunds it.
+ * - A booking is payable only once the owner has confirmed it (status approved), so no money is taken for a
+ *   request the owner may still decline. Paying marks payment_status = paid; cancelling or rejecting a paid
+ *   booking refunds it (booking-service/lifecycle.js).
  */
 'use strict';
 
@@ -88,8 +89,14 @@ router.post(
             'id, renter_id, owner_id, status, total_amount, payment_status',
         );
         if (booking.renter_id !== req.user.id) throw new HttpError(403, 'FORBIDDEN', 'Only the renter can pay for this booking');
-        if (!['requested', 'approved'].includes(booking.status)) {
-            throw new HttpError(409, 'BOOKING_NOT_PAYABLE', 'This booking can no longer be paid');
+        if (booking.status !== 'approved') {
+            throw new HttpError(
+                409,
+                'BOOKING_NOT_PAYABLE',
+                booking.status === 'requested'
+                    ? 'The owner has not confirmed this booking yet. You can pay once it is confirmed.'
+                    : 'This booking can no longer be paid',
+            );
         }
         if (booking.payment_status !== 'pending') throw new HttpError(409, 'ALREADY_PAID', 'This booking has already been paid');
 

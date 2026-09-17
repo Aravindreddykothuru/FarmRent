@@ -7,15 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
-    IndianRupee, Calendar, CheckCircle2, CreditCard,
+    Calendar, CheckCircle2, CreditCard,
     ChevronLeft, Loader2, AlertCircle, MapPin, Info,
     Truck, Store, Tag, X, Banknote,
 } from 'lucide-react';
 import { nodeApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { getMachineId, type Machine as BaseMachine } from '@/lib/getMachineId';
-import { useRazorpay } from '@/hooks/useRazorpay';
-import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 
 interface Machine extends BaseMachine {
@@ -58,7 +56,6 @@ export default function BookPage() {
     const { machineId } = useParams<{ machineId: string }>();
     const router = useRouter();
     const { t } = useLanguage();
-    const { user } = useAuth();
 
     const [machine, setMachine] = useState<Machine | null>(null);
     const [loading, setLoading] = useState(true);
@@ -85,7 +82,6 @@ export default function BookPage() {
     const [quoteLoading, setQuoteLoading] = useState(false);
     const [quoteError, setQuoteError] = useState<string | null>(null);
 
-    const { startCheckout } = useRazorpay();
 
     useEffect(() => {
         if (!machineId) return;
@@ -178,28 +174,16 @@ export default function BookPage() {
         }
     };
 
-    /* ── Step 3: Payment (Razorpay or COD) ── */
-    const handlePayment = async () => {
+    /* ── Step 2 done: the request is with the owner. Online payment waits for their confirmation. ── */
+    const handleDone = () => {
         if (!created) return;
-        setSubmitting(true);
-        try {
-            if (gateway === 'cod') {
-                toast.success('Booking request sent! The owner will confirm it shortly.');
-                router.push(`/payment/success?bookingId=${encodeURIComponent(created.id)}&method=cod`);
-                return;
-            }
-            const profile = user as (typeof user & { phone?: string | null }) | null;
-            await startCheckout({
-                bookingId: created.id,
-                user: { full_name: profile?.name ?? '', email: profile?.email ?? '', phone: profile?.phone ?? '' },
-                onCancelled: () => { toast.error('Payment cancelled — your booking request is saved, you can pay later.'); },
-                onSuccess: (orderId) => {
-                    router.push(`/payment/success?orderId=${encodeURIComponent(orderId)}`);
-                },
-            });
-        } finally {
-            setSubmitting(false);
+        if (gateway === 'cod') {
+            toast.success('Booking request sent! The owner will confirm it shortly.');
+            router.push(`/payment/success?bookingId=${encodeURIComponent(created.id)}&method=cod`);
+            return;
         }
+        toast.success('Booking request sent! You can pay once the owner confirms it.');
+        router.push(`/bookings/${encodeURIComponent(created.id)}`);
     };
 
     const today = todayStr();
@@ -218,7 +202,7 @@ export default function BookPage() {
         </div>
     );
 
-    const steps = [t('booking.confirmBooking'), t('booking.payNow')];
+    const steps = [t('booking.confirmBooking'), 'Request sent'];
 
     const breakdown = quote && (
         <div className="space-y-2 text-sm">
@@ -532,10 +516,10 @@ export default function BookPage() {
                             <div className="space-y-6">
                                 <div className="text-center">
                                     <div className="inline-flex items-center justify-center bg-green-100 rounded-full w-16 h-16 mb-4">
-                                        <CreditCard className="h-8 w-8 text-green-700" />
+                                        <CheckCircle2 className="h-8 w-8 text-green-700" />
                                     </div>
-                                    <h3 className="font-bold text-xl mb-1">{t('booking.completePayment')}</h3>
-                                    <p className="text-gray-500 text-sm">{t('booking.slotHeld')}</p>
+                                    <h3 className="font-bold text-xl mb-1">Request sent to the owner</h3>
+                                    <p className="text-gray-500 text-sm">Your dates are held while the owner reviews it.</p>
                                 </div>
 
                                 {quote && <div className="bg-gray-50 rounded-2xl p-4">{breakdown}</div>}
@@ -554,8 +538,12 @@ export default function BookPage() {
                                         <p className="text-sm text-amber-700">Pay {inr(created.totalAmount)} in cash when the equipment arrives.</p>
                                     </div>
                                 ) : (
-                                    <div className="flex items-center justify-center gap-2 text-sm font-medium text-gray-600">
-                                        <span className="text-lg">🇮🇳</span> Paying via Razorpay (UPI / Card / Netbanking)
+                                    <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center space-y-2">
+                                        <CreditCard className="h-8 w-8 text-green-700 mx-auto" />
+                                        <p className="font-bold text-green-800">Pay once the owner confirms</p>
+                                        <p className="text-sm text-green-700">
+                                            Nothing is charged now. When the owner confirms, a Pay Now button appears on your booking page.
+                                        </p>
                                     </div>
                                 )}
 
@@ -565,21 +553,18 @@ export default function BookPage() {
                                             ? 'bg-amber-500 hover:bg-amber-600'
                                             : 'bg-green-700 hover:bg-green-800'
                                     }`}
-                                    onClick={handlePayment}
-                                    disabled={submitting}
+                                    onClick={handleDone}
                                 >
-                                    {submitting
-                                        ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing…</>
-                                        : gateway === 'cod'
-                                            ? <><Banknote className="mr-2 h-5 w-5" /> Done — Pay on Delivery</>
-                                            : <><CreditCard className="mr-2 h-5 w-5" /> Pay <IndianRupee className="h-4 w-4" />{created.totalAmount.toLocaleString('en-IN')} Online</>
+                                    {gateway === 'cod'
+                                        ? <><Banknote className="mr-2 h-5 w-5" /> Done — Pay on Delivery</>
+                                        : <><CheckCircle2 className="mr-2 h-5 w-5" /> View my booking</>
                                     }
                                 </Button>
 
                                 <p className="text-xs text-center text-gray-400">
                                     {gateway === 'cod'
                                         ? '💵 No advance payment required · The owner confirms your request'
-                                        : '🔒 Secured by Razorpay · Refunded automatically if the owner declines'}
+                                        : '🔒 Secured by Razorpay · You pay only after the owner confirms'}
                                 </p>
                             </div>
                         )}
