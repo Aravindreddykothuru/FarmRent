@@ -114,6 +114,172 @@ describe('booking rooms', () => {
     });
 });
 
+describe('live equipment tracking', () => {
+    /** An owner, a renter, a stranger and a confirmed booking between the first two. */
+    async function confirmedRental() {
+        const owner = await createUser('owner');
+        const renter = await createUser('farmer');
+        const stranger = await createUser('owner');
+        const equipmentId = await createEquipment(owner.id, { dailyRate: 700, deposit: 0 });
+        const [ownerCookie, renterCookie, strangerCookie] = await Promise.all([
+            sessionCookie(owner),
+            sessionCookie(renter),
+            sessionCookie(stranger),
+        ]);
+        const offset = 60 + Math.floor(Math.random() * 300);
+        const booking = await request(getApp())
+            .post('/api/v1/bookings')
+            .set('Cookie', renterCookie)
+            .send({ machineId: equipmentId, startDate: isoDate(offset), endDate: isoDate(offset + 1), paymentMethod: 'cod' })
+            .expect(201);
+        const bookingId = booking.body.data.id;
+        await request(getApp()).patch(`/api/v1/bookings/${bookingId}/accept`).set('Cookie', ownerCookie).expect(200);
+        return { owner, renter, equipmentId, bookingId, ownerCookie, renterCookie, strangerCookie };
+    }
+
+    async function renterWatching(rental) {
+        const { socket } = await connect('/tracking', { cookie: rental.renterCookie });
+        const denied = nextEvent(socket, 'room:denied', 1000);
+        socket.emit('join_booking_room', rental.bookingId);
+        expect(await denied).toBeNull();
+        return socket;
+    }
+
+    const emitWithAck = (socket, payload) =>
+        new Promise((resolve) => socket.timeout(5000).emit('equipment:location_update', payload, (err, ack) => resolve(err ? null : ack)));
+
+    test("the owner's broadcast reaches the renter live and is kept in the rental's history; others are refused", async () => {
+        const rental = await confirmedRental();
+        const renterSocket = await renterWatching(rental);
+        const ownerSocket = (await connect('/tracking', { cookie: rental.ownerCookie })).socket;
+        const strangerSocket = (await connect('/tracking', { cookie: rental.strangerCookie })).socket;
+
+        const refused = await emitWithAck(strangerSocket, {
+            equipmentId: rental.equipmentId,
+            bookingId: rental.bookingId,
+            latitude: 14.7,
+            longitude: 77.61,
+        });
+        expect(refused).toMatchObject({ ok: false, code: 'FORBIDDEN' });
+
+        const received = nextEvent(renterSocket, 'location_update');
+        const ack = await emitWithAck(ownerSocket, {
+            equipmentId: rental.equipmentId,
+            bookingId: rental.bookingId,
+            latitude: 14.6951,
+            longitude: 77.6123,
+            speed: 12.5,
+            heading: 90,
+            accuracy: 8,
+        });
+        expect(ack).toMatchObject({ ok: true });
+        expect(await received).toMatchObject({
+            bookingId: rental.bookingId,
+            equipmentId: rental.equipmentId,
+            latitude: 14.6951,
+            longitude: 77.6123,
+            source: 'mobile_gps',
+        });
+
+        const history = await request(getApp())
+            .get(`/api/v1/tracking/booking/${rental.bookingId}/history`)
+            .set('Cookie', rental.renterCookie)
+            .expect(200);
+        expect(history.body.data).toEqual([expect.objectContaining({ latitude: 14.6951, longitude: 77.6123, speed: 12.5, heading: 90 })]);
+        await request(getApp())
+            .get(`/api/v1/tracking/booking/${rental.bookingId}/history`)
+            .set('Cookie', rental.strangerCookie)
+            .expect(404);
+    });
+
+    test('with the socket unavailable, the REST fallback reaches the renter the same way', async () => {
+        const rental = await confirmedRental();
+        const renterSocket = await renterWatching(rental);
+        const received = nextEvent(renterSocket, 'location_update');
+        await request(getApp())
+            .post('/api/v1/tracking/equipment-update')
+            .set('Cookie', rental.ownerCookie)
+            .send({ equipment_id: rental.equipmentId, booking_id: rental.bookingId, lat: 14.7011, lng: 77.6201 })
+            .expect(200);
+        expect(await received).toMatchObject({ bookingId: rental.bookingId, latitude: 14.7011, longitude: 77.6201 });
+
+        await request(getApp())
+            .post('/api/v1/tracking/equipment-update')
+            .set('Cookie', rental.strangerCookie)
+            .send({ equipment_id: rental.equipmentId, booking_id: rental.bookingId, lat: 1, lng: 1 })
+            .expect(403);
+    });
+
+    test('a hardware tracker needs the device secret and a trackable booking for that equipment', async () => {
+        const rental = await confirmedRental();
+        const renterSocket = await renterWatching(rental);
+        const deviceId = `test-device-${Date.now()}`;
+        const body = {
+            device_id: deviceId,
+            equipment_id: rental.equipmentId,
+            booking_id: rental.bookingId,
+            lat: 14.7102,
+            lng: 77.6305,
+            speed: 20,
+        };
+        const previous = process.env.TRACKING_DEVICE_SECRET;
+        try {
+            delete process.env.TRACKING_DEVICE_SECRET;
+            await request(getApp()).post('/api/v1/tracking/device-update').set('x-device-secret', 'anything').send(body).expect(503);
+
+            process.env.TRACKING_DEVICE_SECRET = 'test-device-secret-0123456789abcdef';
+            await request(getApp()).post('/api/v1/tracking/device-update').send(body).expect(401);
+            await request(getApp())
+                .post('/api/v1/tracking/device-update')
+                .set('x-device-secret', 'wrong-secret-0123456789abcdef00')
+                .send(body)
+                .expect(401);
+            await request(getApp())
+                .post('/api/v1/tracking/device-update')
+                .set('x-device-secret', process.env.TRACKING_DEVICE_SECRET)
+                .send({ ...body, device_id: `${deviceId}-a`, lat: 'north' })
+                .expect(400);
+
+            const other = await createEquipment(rental.owner.id, { dailyRate: 500, deposit: 0 });
+            await request(getApp())
+                .post('/api/v1/tracking/device-update')
+                .set('x-device-secret', process.env.TRACKING_DEVICE_SECRET)
+                .send({ ...body, device_id: `${deviceId}-b`, equipment_id: other })
+                .expect(404);
+
+            const received = nextEvent(renterSocket, 'location_update');
+            const ok = await request(getApp())
+                .post('/api/v1/tracking/device-update')
+                .set('x-device-secret', process.env.TRACKING_DEVICE_SECRET)
+                .send(body)
+                .expect(200);
+            expect(ok.body.data).toMatchObject({ source: 'vehicle_gps', bookingId: rental.bookingId });
+            expect(await received).toMatchObject({ source: 'vehicle_gps', latitude: 14.7102, longitude: 77.6305 });
+
+            await request(getApp())
+                .post('/api/v1/tracking/device-update')
+                .set('x-device-secret', process.env.TRACKING_DEVICE_SECRET)
+                .send(body)
+                .expect(429);
+
+            // Once the rental is cancelled the tracker's positions are no longer accepted.
+            await request(getApp())
+                .patch(`/api/v1/bookings/${rental.bookingId}/cancel`)
+                .set('Cookie', rental.renterCookie)
+                .send({})
+                .expect(200);
+            await request(getApp())
+                .post('/api/v1/tracking/device-update')
+                .set('x-device-secret', process.env.TRACKING_DEVICE_SECRET)
+                .send({ ...body, device_id: `${deviceId}-c` })
+                .expect(422);
+        } finally {
+            if (previous === undefined) delete process.env.TRACKING_DEVICE_SECRET;
+            else process.env.TRACKING_DEVICE_SECRET = previous;
+        }
+    });
+});
+
 describe('equipment chat delivery', () => {
     test("a renter's message reaches only the owner's socket, as chat:message", async () => {
         const owner = await createUser('owner');

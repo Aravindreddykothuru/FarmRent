@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
-import { io, Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
+import { connectTrackingSocket } from '@/lib/socket';
+import { nodeApi } from '@/lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,8 @@ interface BroadcastStats {
   batteryLevel:    number | null;
   distanceTraveled: number;       // metres
 }
+
+type Ack = { ok: boolean; message?: string };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,12 +61,21 @@ function secondsAgo(date: Date | null): string {
 async function getBatteryLevel(): Promise<number | null> {
   try {
     if ('getBattery' in navigator) {
-      type BatteryManager = { level: number; addEventListener(type: string, cb: () => void): void };
+      type BatteryManager = { level: number };
       const battery = await (navigator as Navigator & { getBattery(): Promise<BatteryManager> }).getBattery();
       return Math.round(battery.level * 100);
     }
   } catch { /* not supported */ }
   return null;
+}
+
+/** Emits over the authenticated socket and waits for the server's verdict; null when no answer came back. */
+function emitWithAck(socket: Socket, payload: Record<string, unknown>): Promise<Ack | null> {
+  return new Promise((resolve) => {
+    socket.timeout(5000).emit('equipment:location_update', payload, (err: Error | null, ack?: Ack) => {
+      resolve(err || !ack ? null : ack);
+    });
+  });
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -86,62 +98,46 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
     distanceTraveled: 0,
   });
 
-  const watchIdRef      = useRef<number | null>(null);
-  const lastSentRef     = useRef<{ lat: number; lng: number; time: number } | null>(null);
-  const tickerRef       = useRef<ReturnType<typeof setInterval> | null>(null);
-  const socketRef       = useRef<Socket | null>(null);
+  const watchIdRef  = useRef<number | null>(null);
+  const lastSentRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
+  const socketRef   = useRef<Socket | null>(null);
 
   // ── Ticker for "X seconds ago" display ────────────────────────────────────
   useEffect(() => {
-    tickerRef.current = setInterval(() => setTicker(t => t + 1), 1000);
-    return () => { if (tickerRef.current) clearInterval(tickerRef.current); };
+    const ticker = setInterval(() => setTicker(t => t + 1), 1000);
+    return () => clearInterval(ticker);
   }, []);
 
-  // ── Insert one location point to Supabase / Socket.IO ────────────────────
+  // ── Send one position: the session socket, or the REST endpoint when the socket is down ─────────────
   const sendLocationPoint = useCallback(async (
     lat: number, lng: number,
     accuracy: number | null, speedKmh: number | null,
     heading: number | null, altitude: number | null,
-    battery: number | null,
-  ) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit("equipment:location_update", {
-        equipmentId,
-        bookingId,
-        latitude: lat,
-        longitude: lng,
-        accuracy,
-        speed: speedKmh,
-        heading,
+  ): Promise<boolean> => {
+    const socket = socketRef.current;
+    if (socket?.connected) {
+      const ack = await emitWithAck(socket, { equipmentId, bookingId, latitude: lat, longitude: lng, accuracy, speed: speedKmh, heading, altitude });
+      if (ack?.ok) return true;
+      if (ack) {
+        setError(ack.message ?? 'The server refused this location update.');
+        return false;
+      }
+    }
+    try {
+      await nodeApi.post('/tracking/equipment-update', {
+        equipment_id: equipmentId,
+        booking_id:   bookingId,
+        lat, lng, accuracy, speed: speedKmh, heading, altitude,
       });
       return true;
-    }
-
-    if (!supabase) return false;
-    const { error: dbError } = await supabase.from('equipment_locations').insert({
-      equipment_id:  equipmentId,
-      booking_id:    bookingId,
-      lat,
-      lng,
-      accuracy:      accuracy  ? parseFloat(accuracy.toFixed(2))  : null,
-      speed:         speedKmh  ? parseFloat(speedKmh.toFixed(1))  : null,
-      heading:       heading   ? parseFloat(heading.toFixed(1))   : null,
-      altitude:      altitude  ? parseFloat(altitude.toFixed(1))  : null,
-      battery_level: battery,
-      source:        'mobile_gps',
-    } as Record<string, unknown>);
- 
-    if (dbError) {
-      console.error('GPS insert error:', dbError.message);
-      setError(`DB error: ${dbError.message}`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not send your location.');
       return false;
     }
-    return true;
   }, [bookingId, equipmentId]);
 
   // ── Handle each GPS position update ──────────────────────────────────────
   const handlePosition = useCallback(async (position: GeolocationPosition) => {
-    setError(null);
     const { latitude: lat, longitude: lng, accuracy, speed, heading, altitude } = position.coords;
     const now          = Date.now();
     const last         = lastSentRef.current;
@@ -166,15 +162,27 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
     }));
 
     if (shouldSend) {
-      const ok = await sendLocationPoint(lat, lng, accuracy ?? null, speedKmh, heading ?? null, altitude ?? null, battery);
+      const ok = await sendLocationPoint(lat, lng, accuracy ?? null, speedKmh, heading ?? null, altitude ?? null);
       if (ok) {
+        setError(null);
         lastSentRef.current = { lat, lng, time: now };
         setStats(prev => ({ ...prev, pointsSent: prev.pointsSent + 1, lastSentAt: new Date() }));
       }
     }
   }, [sendLocationPoint]);
 
-  // ── GPS error handler ─────────────────────────────────────────────────────
+  // ── Start / stop ──────────────────────────────────────────────────────────
+  const stopBroadcasting = useCallback(() => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    // The socket is shared by the whole page; only this component's use of it ends.
+    socketRef.current = null;
+    lastSentRef.current = null;
+    setIsActive(false);
+  }, []);
+
   const handleGPSError = useCallback((err: GeolocationPositionError) => {
     const messages: Record<number, string> = {
       1: 'Location access denied. Allow location in browser settings, then try again.',
@@ -183,10 +191,8 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
     };
     setError(messages[err.code] ?? 'Unknown GPS error. Please refresh and try again.');
     if (err.code === 1) stopBroadcasting(); // permission denied — stop immediately
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [stopBroadcasting]);
 
-  // ── Start / stop ──────────────────────────────────────────────────────────
   const startBroadcasting = useCallback(() => {
     if (!('geolocation' in navigator)) {
       setError('GPS is not supported on this device or browser.');
@@ -201,15 +207,7 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
       distanceTraveled: 0,
     }));
     lastSentRef.current = null;
- 
-    // Connect to Socket.IO
-    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
-    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
-    const socketOrigin = backendUrl || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
-    socketRef.current = io(`${socketOrigin}/tracking`, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
+    socketRef.current = connectTrackingSocket(); // authenticated by the session cookie
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       handlePosition,
@@ -219,23 +217,9 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
     setIsActive(true);
   }, [handlePosition, handleGPSError]);
 
-  const stopBroadcasting = useCallback(() => {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
-    if (socketRef.current) {
-      socketRef.current.disconnect();
-      socketRef.current = null;
-    }
-    lastSentRef.current = null;
-    setIsActive(false);
-  }, []);
-
   // ── Cleanup on unmount ────────────────────────────────────────────────────
   useEffect(() => () => {
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
-    if (socketRef.current) socketRef.current.disconnect();
   }, []);
 
   // ── Derived display values ────────────────────────────────────────────────
@@ -271,7 +255,7 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
 
       {/* ── Error Banner ────────────────────────────────────── */}
       {error && (
-        <div className="flex gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+        <div role="alert" className="flex gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
           <span className="shrink-0">⚠️</span>
           <p>{error}</p>
         </div>
@@ -299,7 +283,7 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
           <StatCard label="Speed"       value={stats.currentSpeed != null ? `${stats.currentSpeed} km/h` : 'Stationary'} icon="💨" />
           <StatCard label="Direction"   value={headingToDirection(stats.currentHeading)} icon="🧭" />
           <StatCard label="Distance"    value={`${distKm} km`}                 icon="📏" />
-          <StatCard label="Points Sent" value={String(stats.pointsSent)}        icon="📤" />
+          <StatCard label="Points Sent" value={String(stats.pointsSent)}        icon="📤" testId="points-sent" />
           <StatCard label="Last Sent"   value={secondsAgo(stats.lastSentAt)}    icon="🕐" />
           <StatCard
             label="Session"
@@ -330,14 +314,14 @@ export default function OwnerGPSBroadcaster({ bookingId, equipmentId }: Props) {
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, icon }: { label: string; value: string; icon: string }) {
+function StatCard({ label, value, icon, testId }: { label: string; value: string; icon: string; testId?: string }) {
   return (
     <div className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-2">
       <div className="flex items-center gap-1 text-[10px] text-gray-500">
         <span>{icon}</span>
         <span>{label}</span>
       </div>
-      <p className="mt-0.5 truncate text-xs font-semibold text-gray-900">{value}</p>
+      <p data-testid={testId} className="mt-0.5 truncate text-xs font-semibold text-gray-900">{value}</p>
     </div>
   );
 }

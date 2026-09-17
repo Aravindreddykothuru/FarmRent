@@ -294,6 +294,26 @@ async function main() {
             });
             if (!started) throw new Error('hand-over failed');
 
+            // Live location during the rental: the owner's phone broadcasts over the app's authenticated socket and
+            // the renter's tracking page shows it. No browser talks to the database directly.
+            const tracked = await step(renter, "Owner shares live location; the renter's tracking page shows it", async () => {
+                const where = { latitude: 16.30712, longitude: 80.44118 };
+                await owner.context.grantPermissions(['geolocation'], { origin: ORIGIN });
+                await owner.context.setGeolocation({ ...where, accuracy: 6 });
+
+                await gotoSettled(renter.page, `/dashboard/track/${bookingId}`);
+                await gotoSettled(owner.page, `/dashboard/track/${bookingId}`);
+                await owner.page.getByRole('button', { name: /Start Broadcasting Location/ }).click({ timeout: 30_000 });
+                await owner.page.getByTestId('points-sent').filter({ hasText: /^[1-9]\d*$/ }).waitFor({ timeout: 30_000 });
+
+                const expected = `${where.latitude.toFixed(5)}, ${where.longitude.toFixed(5)}`;
+                const position = renter.page.getByTestId('live-position');
+                await position.filter({ hasText: expected }).waitFor({ timeout: 30_000 });
+                owner.mon.take(); // the owner's page is checked by its own visit later
+                return `renter sees ${expected}`;
+            });
+            if (!tracked) throw new Error('live tracking failed');
+
             const returned = await step(renter, 'Renter returns the equipment and sees the completion code', async () => {
                 const { page } = renter;
                 await gotoSettled(page, `/bookings/${bookingId}`);

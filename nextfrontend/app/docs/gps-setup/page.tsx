@@ -6,12 +6,9 @@
 export const metadata = { title: 'GPS Device Setup | FarmDirect' };
 
 export default function GpsSetupPage() {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') ??
-    'https://your-app.vercel.app';
+  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://your-farmrent-domain').replace(/\/$/, '');
 
-  const endpoint = `${baseUrl}/api/tracking/update`;
+  const endpoint = `${baseUrl}/api/v1/tracking/device-update`;
 
   return (
     <div className="min-h-screen bg-gray-50 py-12">
@@ -27,10 +24,11 @@ export default function GpsSetupPage() {
         {/* Step 1 */}
         <Section title="Step 1: Get Your Credentials">
           <p className="text-sm text-gray-700 mb-3">
-            Contact your FarmDirect admin or check your <code className="bg-gray-100 px-1 rounded">.env</code> file for:
+            Your FarmRent admin sets a device secret on the server (<code className="bg-gray-100 px-1 rounded">TRACKING_DEVICE_SECRET</code>)
+            and gives it to you:
           </p>
-          <CodeBlock>{`TRACKING_DEVICE_SECRET=your-secret-here
-# Ask your admin for this value — never share it publicly.`}</CodeBlock>
+          <CodeBlock>{`x-device-secret: <the value your admin gave you>
+# Never share it publicly — anyone holding it can post positions.`}</CodeBlock>
         </Section>
 
         {/* Step 2 */}
@@ -80,7 +78,7 @@ Body (JSON):
             On success the endpoint returns:
           </p>
           <CodeBlock>{`HTTP 200
-{ "success": true, "received_at": "2025-01-01T10:00:01Z" }`}</CodeBlock>
+{ "success": true, "data": { "received_at": "2025-01-01T10:00:01.000Z", ... } }`}</CodeBlock>
           <p className="text-sm text-gray-700 mt-3 mb-2">Common error codes:</p>
           <table className="w-full text-xs border-collapse">
             <thead>
@@ -93,10 +91,10 @@ Body (JSON):
               {[
                 ['401', 'Wrong or missing x-device-secret header'],
                 ['400', 'Invalid or missing required fields'],
-                ['404', 'Booking ID not found'],
-                ['422', 'Booking is not in an active status'],
+                ['404', 'Booking not found, or it is not for this equipment'],
+                ['422', 'Booking is not confirmed or active'],
                 ['429', 'Rate limit — sending too fast (max 1/10 sec per device)'],
-                ['500', 'Server error — contact support'],
+                ['503', 'Device tracking is not enabled on this server'],
               ].map(([code, msg]) => (
                 <tr key={code} className="border-b border-gray-100">
                   <td className="p-2 border border-gray-200 font-mono">{code}</td>

@@ -793,6 +793,33 @@ describe('API contract — every mounted route', () => {
             ctx.strangerAgent.post('/api/v1/tracking/equipment-update').send({ equipment_id: ctx.equipmentId, lat: 14.7, lng: 77.6 }),
             403,
         );
+
+        // Hardware trackers authenticate with the device secret instead of a session.
+        const previousDeviceSecret = process.env.TRACKING_DEVICE_SECRET;
+        process.env.TRACKING_DEVICE_SECRET = 'contract-device-secret-0123456789';
+        try {
+            const deviceBody = {
+                device_id: `contract-${Date.now()}`,
+                equipment_id: ctx.equipmentId,
+                booking_id: booking.id,
+                lat: 14.71,
+                lng: 77.61,
+            };
+            await check(
+                'POST /api/v1/tracking/device-update',
+                anon().post('/api/v1/tracking/device-update').set('x-device-secret', 'contract-device-secret-0123456789').send(deviceBody),
+                200,
+            );
+            await check(
+                'POST /api/v1/tracking/device-update',
+                anon().post('/api/v1/tracking/device-update').set('x-device-secret', 'not-the-device-secret').send(deviceBody),
+                401,
+                'INVALID_DEVICE_SECRET',
+            );
+        } finally {
+            if (previousDeviceSecret === undefined) delete process.env.TRACKING_DEVICE_SECRET;
+            else process.env.TRACKING_DEVICE_SECRET = previousDeviceSecret;
+        }
     });
 
     test('admin, analytics, market insights, weather', async () => {

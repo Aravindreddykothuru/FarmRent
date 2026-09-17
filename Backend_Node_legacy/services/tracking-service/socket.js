@@ -19,6 +19,8 @@ const { sortRoles } = require('../../lib/roles');
 const { GPSKalmanFilter } = require('../../lib/kalmanGPS');
 const { validateGPS, detectMockLocation } = require('../../lib/gpsValidator');
 const logger = require('../../lib/logger');
+const { HttpError } = require('../../lib/httpError');
+const { recordEquipmentPosition } = require('./equipmentPosition');
 
 let io;
 
@@ -480,55 +482,41 @@ const initializeSocket = (server) => {
             await batchTripLocation(bookingId, driverId, { ...locationPayload, flags });
         });
 
-        socket.on('equipment:location_update', async (data) => {
+        // The owner's phone sharing the equipment's position. The optional acknowledgement callback receives
+        // { ok: true, data } or { ok: false, code, message } so the broadcaster can show what happened.
+        socket.on('equipment:location_update', async (data, ack) => {
+            const reply = typeof ack === 'function' ? ack : () => {};
             const user = socket.data.user;
-            const { equipmentId, latitude, longitude, heading = 0, speed = 0, accuracy = 10 } = data || {};
-            let { bookingId } = data || {};
-            if (!user || !equipmentId) return;
-            if (!(await allowedOnce(socket, `owns:${equipmentId}`, () => ownsEquipment(user.id, equipmentId)))) return;
-            if (bookingId && (await getEquipmentIdForBooking(bookingId)) !== equipmentId) bookingId = null;
-
-            const lat = Number(latitude);
-            const lng = Number(longitude);
-            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            const { equipmentId, bookingId, latitude, longitude, heading, speed, accuracy, altitude } = data || {};
+            if (!user) return reply({ ok: false, code: 'UNAUTHORIZED', message: 'Sign in to share a location' });
+            if (!(await allowedOnce(socket, `owns:${equipmentId}`, () => ownsEquipment(user.id, equipmentId)))) {
+                return reply({ ok: false, code: 'FORBIDDEN', message: 'You can only share the location of your own equipment' });
+            }
 
             const now = Date.now();
-            const locationPayload = {
-                driverId: equipmentId,
-                equipmentId,
-                bookingId,
-                latitude: lat,
-                longitude: lng,
-                heading: Number(heading),
-                speed: Number(speed),
-                accuracy: Number(accuracy),
-                timestamp: now,
-            };
-
-            if (bookingId) {
-                trackingNS.to(`booking_${bookingId}`).emit('location_update', locationPayload);
+            const rateKey = `equipment:${equipmentId}`;
+            if (now - (lastUpdateTime.get(rateKey) || 0) < RATE_LIMIT_MS) {
+                return reply({ ok: false, code: 'RATE_LIMITED', message: 'Location updates are arriving too fast' });
             }
+            lastUpdateTime.set(rateKey, now);
 
-            if (redisClient?.isReady) {
-                const serialized = JSON.stringify(locationPayload);
-                const pipeline = redisClient.multi();
-                pipeline.hSet(`driver_latest:${equipmentId}`, 'location', serialized);
-                pipeline.expire(`driver_latest:${equipmentId}`, 1800);
-                if (bookingId) {
-                    pipeline.hSet(`booking_latest:${bookingId}`, 'location', serialized);
-                    pipeline.expire(`booking_latest:${bookingId}`, 1800);
-                    pipeline.set(`gps:last:${bookingId}`, serialized);
-                    pipeline.expire(`gps:last:${bookingId}`, 86400);
-                }
-                await pipeline.exec().catch(warnOnFailure('equipment location cache write failed', { equipmentId }));
-            }
-
-            // location_point is derived from latitude/longitude by a database trigger.
-            const { error } = await db().from('equipment').update({ latitude: lat, longitude: lng }).eq('id', equipmentId);
-            if (error) logger.warn('[socket] equipment position update failed', { equipmentId, error: error.message });
-
-            if (bookingId) {
-                await batchTripLocation(bookingId, equipmentId, { ...locationPayload, flags: ['equipment_gps'] });
+            try {
+                const point = await recordEquipmentPosition({
+                    equipmentId,
+                    bookingId,
+                    latitude,
+                    longitude,
+                    heading,
+                    speed,
+                    accuracy,
+                    altitude,
+                    source: 'mobile_gps',
+                });
+                return reply({ ok: true, data: point });
+            } catch (err) {
+                if (err instanceof HttpError) return reply({ ok: false, code: err.code, message: err.message });
+                logger.warn('[socket] equipment location update failed', { equipmentId, error: err.message });
+                return reply({ ok: false, code: 'INTERNAL_ERROR', message: 'Could not record the location' });
             }
         });
 

@@ -5,8 +5,10 @@
  * every write comes from the authenticated driver or equipment owner, never from ids in the payload.
  */
 
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
+const { recordEquipmentPosition } = require('./equipmentPosition');
 const { redisClient, getHasGeoSupport } = require('./redisClient');
 const { getIo, emitEtaUpdate, canAccessBooking, canAccessDriver } = require('./socket');
 const { getRouteWithFallback } = require('../routing-service/osrm');
@@ -236,36 +238,21 @@ router.get(
     asyncHandler(async (req, res) => {
         const bookingId = await requireBookingAccess(req);
 
-        const { data, error } = await db()
-            .from('gps_locations')
-            .select('location, heading, speed_kmh, accuracy, recorded_at')
-            .eq('rental_id', bookingId)
-            .order('recorded_at', { ascending: true })
-            .limit(5000);
+        // Coordinates come out of PostGIS (db/migrations/0004): the geography column itself reaches the API as
+        // hex EWKB, not as something it can read.
+        const { data, error } = await db().rpc('rental_location_history', { p_rental_id: bookingId, p_limit: 5000 });
         if (error) throw error;
 
-        const mapped = (data || []).map((r) => {
-            let lat = null;
-            let lng = null;
-            if (r.location?.coordinates) {
-                [lng, lat] = r.location.coordinates;
-            } else if (typeof r.location === 'string') {
-                const match = r.location.match(/POINT\(([-\d.]+) ([-\d.]+)\)/);
-                if (match) {
-                    lng = parseFloat(match[1]);
-                    lat = parseFloat(match[2]);
-                }
-            }
-            return {
-                latitude: lat,
-                longitude: lng,
-                heading: r.heading,
-                speed: r.speed_kmh,
-                accuracy: r.accuracy,
-                gps_flags: [],
-                created_at: r.recorded_at,
-            };
-        });
+        const mapped = (data || []).map((r) => ({
+            latitude: r.latitude,
+            longitude: r.longitude,
+            heading: r.heading,
+            speed: r.speed_kmh,
+            accuracy: r.accuracy,
+            altitude: r.altitude,
+            gps_flags: [],
+            created_at: r.recorded_at,
+        }));
 
         return res.json({ success: true, data: mapped });
     }),
@@ -328,18 +315,15 @@ router.post(
     }),
 );
 
-// ─── POST /api/v1/tracking/equipment-update — live equipment GPS update ───────
+// ─── POST /api/v1/tracking/equipment-update — owner's position update (REST fallback for the socket) ─────
+// With booking_id the position joins that rental's trail and is pushed to the booking room; without it the
+// owner is moving the listing's own location.
 router.post(
     '/equipment-update',
     auth(true),
     asyncHandler(async (req, res) => {
-        const { equipment_id, lat, lng, timestamp } = req.body || {};
-        const latitude = Number(lat);
-        const longitude = Number(lng);
-
-        if (!UUID_RE.test(String(equipment_id)) || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-            throw new HttpError(400, 'VALIDATION_ERROR', 'equipment_id, lat, and lng are required');
-        }
+        const { equipment_id, booking_id, lat, lng, speed, heading, accuracy, altitude } = req.body || {};
+        if (!UUID_RE.test(String(equipment_id))) throw new HttpError(400, 'VALIDATION_ERROR', 'equipment_id, lat, and lng are required');
 
         const { data: equipment, error } = await db().from('equipment').select('owner_id').eq('id', equipment_id).maybeSingle();
         if (error) throw error;
@@ -347,25 +331,84 @@ router.post(
             throw new HttpError(403, 'FORBIDDEN', 'Not authorised to update this equipment location');
         }
 
-        // location_point is derived from latitude/longitude by a database trigger.
-        const { error: updateError } = await db().from('equipment').update({ latitude, longitude }).eq('id', equipment_id);
-        if (updateError) throw updateError;
+        const point = await recordEquipmentPosition({
+            equipmentId: equipment_id,
+            bookingId: booking_id,
+            latitude: lat,
+            longitude: lng,
+            speed,
+            heading,
+            accuracy,
+            altitude,
+            source: 'mobile_gps',
+        });
+        return res.json({ success: true, data: point });
+    }),
+);
 
-        emitSafely(
-            (io) =>
-                io
-                    .of('/tracking')
-                    .to(`tracking:${equipment_id}`)
-                    .emit('equipment:location', {
-                        equipment_id,
-                        lat: latitude,
-                        lng: longitude,
-                        timestamp: timestamp || Date.now(),
-                    }),
-            'equipment-update',
-        );
+// ─── POST /api/v1/tracking/device-update — SIM-based hardware GPS trackers ───────────────────────────────
+// No user session: the device proves itself with the shared secret in x-device-secret (TRACKING_DEVICE_SECRET).
+const DEVICE_MIN_INTERVAL_MS = 10_000;
+const DEVICE_ID_RE = /^[\w.:-]{1,64}$/;
+const deviceLastSeen = new Map(); // used only while Redis is unavailable
 
-        return res.json({ success: true });
+function deviceSecretMatches(expected, received) {
+    if (typeof received !== 'string' || !received) return false;
+    // Compare fixed-length digests so neither the value nor its length leaks through timing.
+    const digest = (value) => crypto.createHash('sha256').update(value).digest();
+    return crypto.timingSafeEqual(digest(expected), digest(received));
+}
+
+async function allowDevicePost(deviceId) {
+    if (redisClient?.isReady) {
+        const set = await redisClient.set(`device_rl:${deviceId}`, '1', { NX: true, PX: DEVICE_MIN_INTERVAL_MS });
+        return set === 'OK';
+    }
+    const now = Date.now();
+    if (now - (deviceLastSeen.get(deviceId) || 0) < DEVICE_MIN_INTERVAL_MS) return false;
+    deviceLastSeen.set(deviceId, now);
+    return true;
+}
+
+router.post(
+    '/device-update',
+    asyncHandler(async (req, res) => {
+        const expected = process.env.TRACKING_DEVICE_SECRET;
+        if (!expected) throw new HttpError(503, 'DEVICE_TRACKING_DISABLED', 'Device tracking is not enabled on this server');
+        if (!deviceSecretMatches(expected, req.get('x-device-secret'))) {
+            throw new HttpError(401, 'INVALID_DEVICE_SECRET', 'Invalid or missing device secret');
+        }
+
+        const { device_id, equipment_id, booking_id, lat, lng, speed, heading, altitude, accuracy, timestamp } = req.body || {};
+        if (typeof device_id !== 'string' || !DEVICE_ID_RE.test(device_id)) {
+            throw new HttpError(400, 'VALIDATION_ERROR', 'device_id is required (letters, digits, . _ : -, at most 64)');
+        }
+        if (!UUID_RE.test(String(equipment_id)) || !UUID_RE.test(String(booking_id))) {
+            throw new HttpError(400, 'VALIDATION_ERROR', 'equipment_id and booking_id must be UUIDs');
+        }
+        const latitude = Number(lat);
+        const longitude = Number(lng);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+            throw new HttpError(400, 'VALIDATION_ERROR', 'Valid lat (-90..90) and lng (-180..180) are required');
+        }
+        if (!(await allowDevicePost(device_id))) {
+            res.set('Retry-After', String(DEVICE_MIN_INTERVAL_MS / 1000));
+            throw new HttpError(429, 'RATE_LIMITED', 'Send at most one position every 10 seconds per device');
+        }
+
+        const point = await recordEquipmentPosition({
+            equipmentId: equipment_id,
+            bookingId: booking_id,
+            latitude,
+            longitude,
+            speed,
+            heading,
+            altitude,
+            accuracy,
+            source: 'vehicle_gps',
+            recordedAt: timestamp,
+        });
+        return res.json({ success: true, data: { ...point, deviceId: device_id, received_at: new Date().toISOString() } });
     }),
 );
 

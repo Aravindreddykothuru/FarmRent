@@ -1,8 +1,15 @@
 'use client';
 
+/**
+ * Live equipment position for one booking, over the app's authenticated /tracking socket.
+ *
+ * The server admits only the booking's renter, owner, assigned driver or an admin to the booking room and pushes
+ * `location_update` there. The trail recorded so far comes from GET /api/v1/tracking/booking/:id/history.
+ * The browser never reads location tables directly.
+ */
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import { connectTrackingSocket } from '@/lib/socket';
+import { nodeApi } from '@/lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -13,7 +20,7 @@ export interface LocationPoint {
   speed:      number | null;    // km/h
   heading:    number | null;
   altitude:   number | null;
-  updated_at: string;           // ISO timestamp from DB
+  updated_at: string;           // ISO timestamp
 }
 
 export interface TrackingState {
@@ -24,7 +31,7 @@ export interface TrackingState {
 
   // Location
   currentLocation:  LocationPoint | null;
-  locationHistory:  LocationPoint[];  // All points this session (for path/trail)
+  locationHistory:  LocationPoint[];  // Trail so far (for path)
   totalDistance:    number;           // metres traveled (sum of Haversine steps)
 
   // Signal
@@ -44,9 +51,21 @@ export interface TrackingState {
 
 interface UseEquipmentTrackingOptions {
   bookingId:              string;
-  enabled?:               boolean;  // Set false to pause subscription
+  enabled?:               boolean;  // Set false to pause
   signalLostThresholdMs?: number;   // Default: 3 minutes
   maxHistoryPoints?:      number;   // Default: 500
+}
+
+/** A position as the server sends it (socket payload or history row). */
+interface ServerPosition {
+  latitude?:   number | null;
+  longitude?:  number | null;
+  accuracy?:   number | null;
+  speed?:      number | null;
+  heading?:    number | null;
+  altitude?:   number | null;
+  timestamp?:  number | null;
+  created_at?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -82,6 +101,25 @@ export function formatSpeed(speedKmh: number | null): string {
   return `${speedKmh.toFixed(1)} km/h`;
 }
 
+const num = (value: unknown): number | null =>
+  value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+
+function toPoint(raw: ServerPosition): LocationPoint | null {
+  const lat = num(raw.latitude);
+  const lng = num(raw.longitude);
+  if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  const time = raw.timestamp ? new Date(raw.timestamp) : raw.created_at ? new Date(raw.created_at) : new Date();
+  return {
+    lat,
+    lng,
+    accuracy:   num(raw.accuracy),
+    speed:      num(raw.speed),
+    heading:    num(raw.heading),
+    altitude:   num(raw.altitude),
+    updated_at: Number.isNaN(time.getTime()) ? new Date().toISOString() : time.toISOString(),
+  };
+}
+
 // ─── Default State ────────────────────────────────────────────────────────────
 
 const DEFAULT_STATE: TrackingState = {
@@ -111,204 +149,103 @@ export function useEquipmentTracking({
 }: UseEquipmentTrackingOptions): TrackingState {
   const [state, setState] = useState<TrackingState>(DEFAULT_STATE);
 
-  const channelRef          = useRef<RealtimeChannel | null>(null);
-  const reconnectTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tickerRef           = useRef<ReturnType<typeof setInterval> | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const lastUpdateAtRef     = useRef<Date | null>(null);
-  const historyRef          = useRef<LocationPoint[]>([]);
-  const totalDistanceRef    = useRef(0);
+  const historyRef       = useRef<LocationPoint[]>([]);
+  const totalDistanceRef = useRef(0);
 
-  // ── Derive display values from a location point ───────────────────────────
-  const deriveDisplayValues = useCallback(
-    (point: LocationPoint, totalDist: number) => ({
-      speedDisplay:     formatSpeed(point.speed),
-      directionDisplay: headingToCompass(point.heading),
-      accuracyDisplay:  point.accuracy ? `±${Math.round(point.accuracy)}m` : '—',
-      distanceDisplay:  formatDistance(totalDist),
-    }),
-    [],
-  );
-
-  // ── Process a new incoming location point ─────────────────────────────────
-  const processNewPoint = useCallback(
-    (rawPoint: Record<string, unknown>) => {
-      const point: LocationPoint = {
-        lat:        parseFloat(String(rawPoint.lat)),
-        lng:        parseFloat(String(rawPoint.lng)),
-        accuracy:   rawPoint.accuracy  ? parseFloat(String(rawPoint.accuracy))  : null,
-        speed:      rawPoint.speed     ? parseFloat(String(rawPoint.speed))     : null,
-        heading:    rawPoint.heading   ? parseFloat(String(rawPoint.heading))   : null,
-        altitude:   rawPoint.altitude  ? parseFloat(String(rawPoint.altitude))  : null,
-        updated_at: String(rawPoint.updated_at ?? new Date().toISOString()),
-      };
-
-      // Validate coordinates
-      if (
-        isNaN(point.lat) || isNaN(point.lng) ||
-        point.lat < -90  || point.lat > 90   ||
-        point.lng < -180 || point.lng > 180
-      ) {
-        console.warn('Invalid GPS coordinates received:', rawPoint);
-        return;
-      }
-
-      // Calculate incremental distance, ignore GPS jitter < 2 m when stationary
+  const applyPoints = useCallback((points: LocationPoint[], live: boolean) => {
+    if (!points.length) return;
+    for (const point of points) {
       const prev = historyRef.current[historyRef.current.length - 1];
+      // Ignore GPS jitter under 2 m when stationary
       if (prev) {
         const step = haversineMeters(prev.lat, prev.lng, point.lat, point.lng);
         if (step > 2) totalDistanceRef.current += step;
       }
-
-      historyRef.current  = [...historyRef.current, point].slice(-maxHistoryPoints);
-      lastUpdateAtRef.current = new Date();
-
-      setState(prev => ({
-        ...prev,
-        currentLocation:   point,
-        locationHistory:   historyRef.current,
-        totalDistance:     totalDistanceRef.current,
-        lastUpdateAt:      lastUpdateAtRef.current,
-        secondsSinceUpdate: 0,
-        isSignalLost:      false,
-        error:             null,
-        ...deriveDisplayValues(point, totalDistanceRef.current),
-      }));
-    },
-    [maxHistoryPoints, deriveDisplayValues],
-  );
-
-  // ── Fetch latest location from DB on connect ──────────────────────────────
-  const fetchInitialLocation = useCallback(async () => {
-    if (!supabase) return;
-    try {
-      const { data, error } = await supabase
-        .from('equipment_locations')
-        .select('lat, lng, accuracy, speed, heading, altitude, updated_at')
-        .eq('booking_id', bookingId)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .single();
-      if (error) throw error;
-      if (data) processNewPoint(data as Record<string, unknown>);
-    } catch (err: unknown) {
-      // Non-fatal — Realtime will populate once owner starts broadcasting
-      console.warn('Could not fetch initial location:', (err as Error)?.message);
+      historyRef.current.push(point);
     }
-  }, [bookingId, processNewPoint]);
-
-  // ── Exponential backoff reconnect ─────────────────────────────────────────
-  // Declared as ref-forwarded to avoid circular dependency with subscribe
-  const scheduleReconnectRef = useRef<() => void>(() => {});
-
-  // ── Subscribe to Supabase Realtime ────────────────────────────────────────
-  const subscribe = useCallback(() => {
-    if (!enabled || !bookingId || !supabase) return;
-
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
+    historyRef.current = historyRef.current.slice(-maxHistoryPoints);
+    const latest = historyRef.current[historyRef.current.length - 1];
+    const lastUpdateAt = live ? new Date() : new Date(latest.updated_at);
 
     setState(prev => ({
       ...prev,
-      connectionStatus: reconnectAttemptsRef.current > 0 ? 'reconnecting' : 'connecting',
-      isReconnecting:   reconnectAttemptsRef.current > 0,
+      currentLocation:    latest,
+      locationHistory:    [...historyRef.current],
+      totalDistance:      totalDistanceRef.current,
+      lastUpdateAt,
+      secondsSinceUpdate: Math.max(0, Math.floor((Date.now() - lastUpdateAt.getTime()) / 1000)),
+      isSignalLost:       Date.now() - lastUpdateAt.getTime() > signalLostThresholdMs,
+      error:              null,
+      speedDisplay:       formatSpeed(latest.speed),
+      directionDisplay:   headingToCompass(latest.heading),
+      accuracyDisplay:    latest.accuracy ? `±${Math.round(latest.accuracy)}m` : '—',
+      distanceDisplay:    formatDistance(totalDistanceRef.current),
     }));
+  }, [maxHistoryPoints, signalLostThresholdMs]);
 
-    const channel = supabase
-      .channel(`equipment-tracking-${bookingId}`, {
-        config: { broadcast: { ack: true } },
+  // ── Trail recorded so far, then live updates from the booking room ────────
+  useEffect(() => {
+    if (!enabled || !bookingId) return;
+    let cancelled = false;
+    historyRef.current = [];
+    totalDistanceRef.current = 0;
+
+    nodeApi.get<ServerPosition[]>(`/tracking/booking/${bookingId}/history`)
+      .then((rows) => {
+        if (cancelled) return;
+        applyPoints((rows ?? []).map(toPoint).filter((p): p is LocationPoint => p !== null), false);
       })
-      .on(
-        'postgres_changes',
-        {
-          event:  'INSERT',
-          schema: 'public',
-          table:  'equipment_locations',
-          filter: `booking_id=eq.${bookingId}`,
-        },
-        (payload) => {
-          processNewPoint(payload.new as Record<string, unknown>);
-        },
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          reconnectAttemptsRef.current = 0;
-          setState(prev => ({
-            ...prev,
-            isConnected:      true,
-            isReconnecting:   false,
-            connectionStatus: 'connected',
-            error:            null,
-          }));
-          fetchInitialLocation();
-        }
-
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setState(prev => ({
-            ...prev,
-            isConnected:      false,
-            connectionStatus: 'reconnecting',
-            isReconnecting:   true,
-            error:            'Realtime connection lost. Reconnecting…',
-          }));
-          scheduleReconnectRef.current();
-        }
-
-        if (status === 'CLOSED') {
-          setState(prev => ({
-            ...prev,
-            isConnected:      false,
-            connectionStatus: 'disconnected',
-            isReconnecting:   false,
-          }));
-        }
+      .catch((err: unknown) => {
+        if (!cancelled) setState(prev => ({ ...prev, error: err instanceof Error ? err.message : 'Could not load the trail' }));
       });
 
-    channelRef.current = channel;
-  }, [bookingId, enabled, processNewPoint, fetchInitialLocation]);
-
-  // Wire up the reconnect ref after subscribe is stable
-  useEffect(() => {
-    scheduleReconnectRef.current = () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      reconnectAttemptsRef.current += 1;
-      const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 30_000);
-      reconnectTimerRef.current = setTimeout(() => subscribe(), delay);
+    const socket = connectTrackingSocket();
+    const join = () => {
+      socket.emit('join_booking_room', bookingId);
+      setState(prev => ({ ...prev, isConnected: true, isReconnecting: false, connectionStatus: 'connected' }));
     };
-  }, [subscribe]);
+    const onDisconnect = () =>
+      setState(prev => ({ ...prev, isConnected: false, isReconnecting: true, connectionStatus: 'reconnecting' }));
+    const onConnectError = () =>
+      setState(prev => ({ ...prev, isConnected: false, isReconnecting: false, connectionStatus: 'disconnected' }));
+    const onDenied = (payload: { room?: string; id?: string }) => {
+      if (payload?.room !== 'booking' || payload.id !== bookingId) return;
+      setState(prev => ({ ...prev, isConnected: false, connectionStatus: 'disconnected', error: 'You are not a party to this booking.' }));
+    };
+    const onLocation = (payload: ServerPosition & { bookingId?: string | null; fromCache?: boolean }) => {
+      if (payload?.bookingId && payload.bookingId !== bookingId) return;
+      const point = toPoint(payload);
+      if (point) applyPoints([point], !payload.fromCache);
+    };
 
-  // ── Mount / bookingId change ───────────────────────────────────────────────
-  useEffect(() => {
-    if (!enabled) return;
-    subscribe();
+    if (socket.connected) join();
+    socket.on('connect', join);
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect_error', onConnectError);
+    socket.on('room:denied', onDenied);
+    socket.on('location_update', onLocation);
+
     return () => {
-      if (channelRef.current && supabase) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      cancelled = true;
+      socket.emit('leave_booking_room', bookingId);
+      socket.off('connect', join);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onConnectError);
+      socket.off('room:denied', onDenied);
+      socket.off('location_update', onLocation);
     };
-  }, [bookingId, enabled, subscribe]);
+  }, [bookingId, enabled, applyPoints]);
 
   // ── Tick: update secondsSinceUpdate + detect signal loss ──────────────────
   useEffect(() => {
-    tickerRef.current = setInterval(() => {
+    const ticker = setInterval(() => {
       setState(prev => {
         if (!prev.lastUpdateAt) return prev;
-        const secondsSince = Math.floor(
-          (Date.now() - prev.lastUpdateAt.getTime()) / 1000,
-        );
-        const isSignalLost =
-          Date.now() - prev.lastUpdateAt.getTime() > signalLostThresholdMs;
-        return { ...prev, secondsSinceUpdate: secondsSince, isSignalLost };
+        const elapsed = Date.now() - prev.lastUpdateAt.getTime();
+        return { ...prev, secondsSinceUpdate: Math.floor(elapsed / 1000), isSignalLost: elapsed > signalLostThresholdMs };
       });
     }, 1000);
-
-    return () => {
-      if (tickerRef.current) clearInterval(tickerRef.current);
-    };
+    return () => clearInterval(ticker);
   }, [signalLostThresholdMs]);
 
   return state;

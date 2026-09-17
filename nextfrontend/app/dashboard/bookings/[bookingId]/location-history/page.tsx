@@ -23,9 +23,19 @@ import {
   MapPin, Navigation, Clock, Gauge, Route,
   Download,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { nodeApi } from '@/lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+/** A trail point as GET /api/v1/tracking/booking/:id/history returns it. */
+interface HistoryPoint {
+  latitude:   number | null;
+  longitude:  number | null;
+  speed:      number | null;
+  heading:    number | null;
+  accuracy:   number | null;
+  created_at: string;
+}
 
 interface LocationRow {
   id:         string;
@@ -266,40 +276,33 @@ export default function LocationHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
 
-  // ── Fetch all location points ───────────────────────────────────────────────
+  // ── Fetch all location points (the API admits only the booking's parties) ──
   useEffect(() => {
-    if (!bookingId || !supabase) { setLoading(false); return; }
+    if (!bookingId) { setLoading(false); return; }
+    let cancelled = false;
 
-    const fetchRows = async () => {
-      try {
-        const { data, error: err } = await supabase!
-          .from('equipment_locations')
-          .select('id, lat, lng, speed, heading, accuracy, altitude, updated_at')
-          .eq('booking_id', bookingId)
-          .order('updated_at', { ascending: true });
-        if (err) { setError(err.message); return; }
+    nodeApi.get<HistoryPoint[]>(`/tracking/booking/${bookingId}/history`)
+      .then((points) => {
+        if (cancelled) return;
         setRows(
-          (data ?? []).map(r => {
-            const row = r as Record<string, unknown>;
-            return {
-              id:         String(row.id),
-              lat:        Number(row.lat),
-              lng:        Number(row.lng),
-              speed:      row.speed    != null ? Number(row.speed)    : null,
-              heading:    row.heading  != null ? Number(row.heading)  : null,
-              accuracy:   row.accuracy != null ? Number(row.accuracy) : null,
-              altitude:   row.altitude != null ? Number(row.altitude) : null,
-              updated_at: String(row.updated_at ?? ''),
-            };
-          }),
+          (points ?? [])
+            .filter((p) => p.latitude != null && p.longitude != null)
+            .map((p, i) => ({
+              id:         String(i),
+              lat:        Number(p.latitude),
+              lng:        Number(p.longitude),
+              speed:      p.speed    != null ? Number(p.speed)    : null,
+              heading:    p.heading  != null ? Number(p.heading)  : null,
+              accuracy:   p.accuracy != null ? Number(p.accuracy) : null,
+              altitude:   null,
+              updated_at: p.created_at,
+            })),
         );
-      } catch (e: unknown) {
-        setError(String(e));
-      } finally {
-        setLoading(false);
-      }
-    };
-    void fetchRows();
+      })
+      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load the location history'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
   }, [bookingId]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -322,18 +325,6 @@ export default function LocationHistoryPage() {
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
-  if (!supabase) return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="text-center max-w-sm">
-        <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-3" />
-        <p className="font-bold">Supabase Not Configured</p>
-        <p className="text-sm text-gray-500 mt-1">
-          Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.
-        </p>
-      </div>
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
       {/* Header */}
