@@ -56,14 +56,21 @@ export default function TrackingMap({
   const accuracyCircleRef   = useRef<unknown>(null);
   const pickupMarkerRef     = useRef<unknown>(null);
   const pathPolylineRef     = useRef<unknown>(null);
-  const initializedRef      = useRef(false);
 
   // ── Initialise map (once on mount) ────────────────────────────────────────
   useEffect(() => {
-    if (initializedRef.current || !containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    async function init() {
+    // The map is created after an await, and React mounts, unmounts and remounts this component in
+    // development. An unmount can therefore land mid-await: the cleanup would find no map to remove, and the
+    // second mount would call L.map() on the container the first mount was still attaching to — which Leaflet
+    // refuses with "Map container is already initialized". Track the pending creation instead of a flag.
+    let cancelled = false;
+
+    const ready = (async () => {
       const L = (await import('leaflet')).default;
+      if (cancelled) return null;
 
       // Fix Next.js default icon path bug
       delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
@@ -137,19 +144,30 @@ export default function TrackingMap({
       if (showPath) polyline.addTo(map);
       pathPolylineRef.current = polyline;
 
-      mapRef.current     = map;
-      initializedRef.current = true;
-    }
-
-    init();
+      mapRef.current = map;
+      if (cancelled) {
+        map.remove();
+        mapRef.current = null;
+        return null;
+      }
+      return map;
+    })();
 
     return () => {
-      const m = mapRef.current as { remove?: () => void } | null;
-      if (m?.remove) {
-        m.remove();
-        mapRef.current     = null;
-        initializedRef.current = false;
-      }
+      cancelled = true;
+      // Wait for the pending creation before tearing down, so a map created after this cleanup is still
+      // removed. The marker refs belong to that map and must not outlive it.
+      ready
+        .then((created) => {
+          const m = (mapRef.current ?? created) as { remove?: () => void } | null;
+          m?.remove?.();
+          mapRef.current            = null;
+          equipmentMarkerRef.current = null;
+          accuracyCircleRef.current  = null;
+          pickupMarkerRef.current    = null;
+          pathPolylineRef.current    = null;
+        })
+        .catch(() => {});
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally runs once — subsequent prop changes handled below
