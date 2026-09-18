@@ -1,20 +1,23 @@
 /**
  * emailService.js — Multi-provider email delivery for FarmRent
  *
- * Priority order (default — set EMAIL_PROVIDER to override):
- *   1. Brevo SMTP  (BREVO_SMTP_USER + BREVO_SMTP_PASS + BREVO_SENDER_EMAIL)
- *   2. Gmail SMTP  (SMTP_HOST + SMTP_USER + SMTP_PASS + EMAIL_FROM)
- *   3. Resend API  (RESEND_API_KEY — skipped in sandbox unless domain verified)
- *   4. Ethereal    (dev fallback — preview URL in console)
+ * EMAIL_PROVIDERS sets the chain, primary first — for example "smtp,msg91" tries Gmail and falls through to
+ * MSG91 when it fails, times out or refuses. Providers that are not fully configured are skipped rather than
+ * tried, and each message is attempted down the chain until one accepts it. The older EMAIL_PROVIDER names only
+ * a primary and is still honoured.
  *
- * ── Quick start with Resend (5 min, no credit card) ──────────────────────────
- *   1. Sign up at https://resend.com/signup
- *   2. Dashboard → API Keys → Create API Key → copy it
- *   3. Add to .env:  RESEND_API_KEY=re_xxxxxxxxxxxx
- *                    EMAIL_FROM=FarmRent <onboarding@resend.dev>
- *      (Use onboarding@resend.dev for testing. For production, verify your domain.)
+ * Providers:
+ *   brevo     BREVO_SMTP_USER + BREVO_SMTP_PASS + BREVO_SENDER_EMAIL      (SMTP, takes rendered HTML)
+ *   smtp      SMTP_HOST + SMTP_USER + SMTP_PASS + EMAIL_FROM              (SMTP, takes rendered HTML)
+ *   msg91     MSG91_AUTH_KEY + MSG91_DOMAIN + MSG91_FROM_EMAIL            (API, templates only — see below)
+ *   resend    RESEND_API_KEY                        (skipped on the sandbox sender unless a domain is verified)
+ *   ethereal  dev fallback — a fake inbox, never used when a real provider is configured or in production
  *
- * ── Gmail SMTP (alternative) ─────────────────────────────────────────────────
+ * MSG91 sends templates built in its panel, not markup: a message reaches it only if it carries a template id
+ * (see sendPasswordResetEmail), and anything else is declined so the next provider takes it. That means the
+ * reset email exists twice — as HTML here and as a template there — and the two must be kept in step.
+ *
+ * ── Gmail SMTP ───────────────────────────────────────────────────────────────
  *   1. myaccount.google.com → Security → 2-Step Verification (enable)
  *   2. myaccount.google.com → Security → App passwords → Other → "FarmRent"
  *   3. Add to .env:
@@ -86,23 +89,42 @@ const isProduction = () => process.env.NODE_ENV === 'production';
  * them may stand in for one that is configured, or "the email works" stops meaning anything.
  */
 function hasRealProvider() {
-    return isBrevoConfigured() || isSmtpConfigured() || shouldUseResend();
+    return isBrevoConfigured() || isSmtpConfigured() || isMsg91Configured() || shouldUseResend();
 }
 
+/**
+ * The providers to try, in order, for one message.
+ *
+ * EMAIL_PROVIDERS names the chain outright — "smtp,msg91" means Gmail first and MSG91 when it fails. The older
+ * EMAIL_PROVIDER named only a primary and left the rest to a hard-coded order; it is still honoured so existing
+ * deployments keep working. Providers that are not fully configured are dropped rather than tried and failed,
+ * so a half-filled block costs nothing.
+ */
 function providerOrder() {
-    const preferred = (process.env.EMAIL_PROVIDER || 'brevo').toLowerCase();
     const all = {
         brevo: sendViaBrevo,
         smtp: sendViaSmtp,
+        msg91: sendViaMsg91,
         resend: sendViaResend,
         ethereal: sendViaEthereal,
     };
-    const chain =
-        preferred === 'smtp'
-            ? ['smtp', 'brevo', 'resend', 'ethereal']
-            : preferred === 'resend'
-              ? ['resend', 'brevo', 'smtp', 'ethereal']
-              : ['brevo', 'smtp', 'resend', 'ethereal'];
+    const DEFAULT_ORDER = ['brevo', 'smtp', 'msg91', 'resend'];
+
+    const listed = String(process.env.EMAIL_PROVIDERS || '')
+        .split(',')
+        .map((n) => n.trim().toLowerCase())
+        .filter((n) => all[n]);
+
+    let chain;
+    if (listed.length) {
+        // Anything the list leaves out still trails behind it: a provider that is configured is worth trying
+        // before giving up entirely.
+        chain = [...listed, ...DEFAULT_ORDER.filter((n) => !listed.includes(n))];
+    } else {
+        const preferred = (process.env.EMAIL_PROVIDER || 'brevo').toLowerCase();
+        chain = all[preferred] ? [preferred, ...DEFAULT_ORDER.filter((n) => n !== preferred)] : DEFAULT_ORDER;
+    }
+    chain.push('ethereal');
 
     return chain
         .map((name) => all[name])
@@ -110,6 +132,7 @@ function providerOrder() {
             if (fn === sendViaResend) return shouldUseResend();
             if (fn === sendViaBrevo) return isBrevoConfigured();
             if (fn === sendViaSmtp) return isSmtpConfigured();
+            if (fn === sendViaMsg91) return isMsg91Configured();
             // Ethereal is a fake mailbox only a developer can read. It is a last resort where nothing real is
             // configured — never a silent substitute for a provider that is, and never in production.
             if (fn === sendViaEthereal) return !isProduction() && !hasRealProvider();
@@ -162,6 +185,9 @@ async function sendViaResend({ to, subject, html, attachments }) {
 const SMTP_TIMEOUTS = { connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 20_000 };
 // Overridable so tests can drive the backstop in milliseconds instead of waiting out the real bound.
 const MEMORY_SEND_TIMEOUT_MS = Number(process.env.EMAIL_SEND_TIMEOUT_MS) || 30_000;
+// How long any one provider gets before the chain moves on. Above socketTimeout, so a provider's own error is
+// what normally ends its turn; this only catches a call that fails to settle at all.
+const PROVIDER_TIMEOUT_MS = Number(process.env.EMAIL_PROVIDER_TIMEOUT_MS) || 25_000;
 
 /** Rejects if `promise` has not settled within `ms`, so one stalled network call cannot block the queue. */
 function withTimeout(promise, ms, what) {
@@ -234,6 +260,65 @@ async function sendViaSmtp({ to, subject, html, attachments }) {
     }
 }
 
+// ── Provider: MSG91 ──────────────────────────────────────────────────────────
+//
+// MSG91's email API sends templates, not markup: the body carries a template_id and variables, and the content
+// itself lives in the MSG91 panel. It therefore cannot send the HTML this file renders. A message that names no
+// template is declined here and picked up by the next provider in the chain, which is what keeps booking mail,
+// invoices and OTPs working while only the templated ones go through MSG91.
+//
+// Contract: POST https://control.msg91.com/api/v5/email/send, authkey header, body
+// { recipients: [{ to: [{name, email}], variables }], from: {name, email}, domain, template_id }.
+
+const MSG91_ENDPOINT = 'https://control.msg91.com/api/v5/email/send';
+
+function isMsg91Configured() {
+    return Boolean(process.env.MSG91_AUTH_KEY && process.env.MSG91_DOMAIN && process.env.MSG91_FROM_EMAIL);
+}
+
+async function sendViaMsg91({ to, subject, template }) {
+    if (!isMsg91Configured()) return false;
+
+    const templateId = template?.id;
+    if (!templateId) {
+        logger.info('[email/msg91] Skipped — this message has no MSG91 template', { subject });
+        return false;
+    }
+
+    const name = String(to).split('@')[0];
+    const body = {
+        recipients: [{ to: [{ name, email: to }], ...(template.variables ? { variables: template.variables } : {}) }],
+        from: { name: process.env.MSG91_FROM_NAME || 'FarmRent', email: process.env.MSG91_FROM_EMAIL },
+        domain: process.env.MSG91_DOMAIN,
+        template_id: templateId,
+    };
+
+    // fetch has no timeout of its own, so the same bound the SMTP transports carry is applied here by hand.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SMTP_TIMEOUTS.socketTimeout);
+    try {
+        const res = await fetch(MSG91_ENDPOINT, {
+            method: 'POST',
+            headers: { authkey: process.env.MSG91_AUTH_KEY, 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+        });
+        const text = await res.text();
+        if (!res.ok) {
+            logger.warn('[email/msg91] Send failed', { to, subject, status: res.status, body: text.slice(0, 300) });
+            return false;
+        }
+        logger.info('[email/msg91] Sent', { to, subject, templateId });
+        return true;
+    } catch (e) {
+        const reason = e.name === 'AbortError' ? `no response within ${SMTP_TIMEOUTS.socketTimeout}ms` : e.message;
+        logger.warn('[email/msg91] Send failed', { to, subject, error: reason });
+        return false;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 // ── Provider: Ethereal (auto-generated test account, clickable preview URL) ───
 
 let _etherealAccount = null;
@@ -289,6 +374,13 @@ async function sendViaEthereal({ to, subject, html, attachments }) {
     }
 }
 
+// The chain reports which provider accepted a message, so the name travels with the function.
+sendViaResend.providerName = 'resend';
+sendViaBrevo.providerName = 'brevo';
+sendViaSmtp.providerName = 'smtp';
+sendViaMsg91.providerName = 'msg91';
+sendViaEthereal.providerName = 'ethereal';
+
 // ── Unified send (queued via BullMQ with memory fallback) ─────────────────────
 
 const { Queue, Worker } = require('bullmq');
@@ -302,18 +394,39 @@ let connection = null;
 let emailQueue = null;
 let emailWorker = null;
 
-async function sendActual({ to, subject, html, attachments }) {
+async function sendActual({ to, subject, html, attachments, template }) {
     if (!to) return false;
 
     // The dev inbox is for machines with no real provider. Where one is configured the message goes to the real
     // mailbox and nothing is stashed locally, so /api/dev/emails can never be mistaken for proof of delivery.
     if (!isProduction() && !hasRealProvider()) devStore.store({ to, subject, html, attachments });
 
+    const failures = [];
     for (const provider of providerOrder()) {
-        if (await provider({ to, subject, html, attachments })) return true;
+        const name = provider.providerName || provider.name;
+        try {
+            // Bounded per provider, not once around the whole chain: a provider that hangs must cost its own
+            // turn and nothing more, or the fallback never gets one and having two providers buys nothing.
+            // Set above the socket timeout so a provider's own error surfaces first and reads better in the log.
+            const accepted = await withTimeout(
+                Promise.resolve(provider({ to, subject, html, attachments, template })),
+                PROVIDER_TIMEOUT_MS,
+                `${name} send to ${to}`,
+            );
+            if (accepted) {
+                if (failures.length) logger.warn('[email] Delivered by a fallback provider', { to, subject, via: name, failures });
+                return true;
+            }
+            failures.push(name);
+        } catch (err) {
+            // A provider that throws — a timeout, a refused connection, a DNS failure — must not take the rest of
+            // the chain down with it. That is the whole point of having more than one.
+            failures.push(`${name} (${err.message})`);
+            logger.warn('[email] Provider failed; trying the next one', { to, subject, provider: name, error: err.message });
+        }
     }
 
-    logger.error('[email] All providers failed', { to, subject, from: getFromAddress() });
+    logger.error('[email] All providers failed', { to, subject, from: getFromAddress(), tried: failures });
     return false;
 }
 
@@ -398,8 +511,8 @@ if (isDev && !hasRedisUrl) {
             emailWorker = new Worker(
                 'emails',
                 async (job) => {
-                    const { to, subject, html, attachments } = job.data;
-                    const success = await sendActual({ to, subject, html, attachments });
+                    const { to, subject, html, attachments, template } = job.data;
+                    const success = await sendActual({ to, subject, html, attachments, template });
                     if (!success) throw new Error('Email sending failed across all providers');
                 },
                 {
@@ -463,7 +576,7 @@ async function processNextMemoryEmail() {
     }
 }
 
-async function send({ to, subject, html, attachments }) {
+async function send({ to, subject, html, attachments, template }) {
     if (!to) return false;
 
     // Convert Buffers to Base64 strings for Redis/JSON queue compatibility
@@ -484,17 +597,17 @@ async function send({ to, subject, html, attachments }) {
 
     if (emailQueue && connection && connection.status === 'ready') {
         try {
-            await emailQueue.add('send', { to, subject, html, attachments: serializableAttachments });
+            await emailQueue.add('send', { to, subject, html, attachments: serializableAttachments, template });
             return true;
         } catch (err) {
             logger.error('[email-queue] BullMQ add failed, falling back to memory queue:', { error: err.message });
-            memoryEmailQueue.push({ to, subject, html, attachments: serializableAttachments });
+            memoryEmailQueue.push({ to, subject, html, attachments: serializableAttachments, template });
             triggerMemoryEmailWorker();
             return true;
         }
     } else {
         // Fallback to local memory queue
-        memoryEmailQueue.push({ to, subject, html, attachments: serializableAttachments });
+        memoryEmailQueue.push({ to, subject, html, attachments: serializableAttachments, template });
         triggerMemoryEmailWorker();
         return true;
     }
@@ -507,10 +620,10 @@ async function send({ to, subject, html, attachments }) {
  * reset link is on the way — or refuse the request when it is not. Mail whose outcome the caller must know
  * goes through here; everything else can be queued.
  */
-async function sendNow({ to, subject, html, attachments }) {
+async function sendNow({ to, subject, html, attachments, template }) {
     if (!to) return false;
     try {
-        return await withTimeout(sendActual({ to, subject, html, attachments }), MEMORY_SEND_TIMEOUT_MS, `email to ${to}`);
+        return await withTimeout(sendActual({ to, subject, html, attachments, template }), MEMORY_SEND_TIMEOUT_MS, `email to ${to}`);
     } catch (err) {
         logger.error('[email] Direct send failed', { to, subject, error: err.message });
         return false;
@@ -562,6 +675,11 @@ async function sendPasswordResetEmail(userEmail, { userName, link }) {
     return sendNow({
         to: userEmail,
         subject: '🔐 Reset your FarmRent password',
+        // MSG91 can only send templates, so the reset carries the id of the one built in its panel along with
+        // the values it fills in. Providers that take markup use the html below and ignore this.
+        template: process.env.MSG91_RESET_TEMPLATE_ID
+            ? { id: process.env.MSG91_RESET_TEMPLATE_ID, variables: { NAME: userName, LINK: link } }
+            : undefined,
         html: base(`
           <h2 style="color:#111827;margin-top:0;">Reset Your Password</h2>
           <p style="color:#374151;">Hi <strong>${userName}</strong>,</p>

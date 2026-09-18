@@ -6,15 +6,19 @@
  * password reset queued behind such a send is, to the person waiting for it, simply an email that never came.
  * The drain is now bounded, and the flag it holds is released even if a send throws.
  */
-process.env.EMAIL_SEND_TIMEOUT_MS = '300'; // read when the service is required, below
+// The stalled send is abandoned per provider; the backstop around the whole chain stays above that, so the
+// drain is never cut short by its own guard while a provider is still within its turn.
+process.env.EMAIL_PROVIDER_TIMEOUT_MS = '300';
+process.env.EMAIL_SEND_TIMEOUT_MS = '5000'; // read when the service is required, below
 const devStore = require('../../lib/devEmailStore');
 
-// One hanging send, then normal ones. The transport is the only thing faked; the queue is the real code.
+// One message hangs; everything else sends normally. The transport is the only thing faked; the queue is the
+// real code. The hang is keyed on the subject rather than "the next call", because the drain is asynchronous:
+// a flag would be consumed by whichever message happened to arrive first and leak into the following test.
 // The names carry the mock prefix because jest.mock's factory may only reach variables named that way.
-let mockHangNext = false;
+const mockHangingSubject = 'stalls for ever';
 const mockSendMail = jest.fn(async (message) => {
-    if (mockHangNext) {
-        mockHangNext = false;
+    if (message.subject === mockHangingSubject) {
         await new Promise(() => {}); // never settles, like a socket to a host that stopped answering
     }
     return { messageId: `<${message.subject}>` };
@@ -44,13 +48,11 @@ describe('email queue', () => {
     beforeEach(() => {
         devStore.clear();
         mockSendMail.mockClear();
-        mockHangNext = false;
     });
 
     test('a send that never finishes is abandoned, and the emails behind it still go out', async () => {
-        mockHangNext = true;
-        await emailService.send({ to: 'first@farmrent.test', subject: 'stalls for ever', html: '<p>one</p>' });
-        expect(await waitFor(() => captured('stalls for ever'))).toBe(true);
+        await emailService.send({ to: 'first@farmrent.test', subject: mockHangingSubject, html: '<p>one</p>' });
+        expect(await waitFor(() => captured(mockHangingSubject))).toBe(true);
 
         // The second message is queued behind a send that will never settle. Before the fix it stayed there.
         await emailService.send({ to: 'second@farmrent.test', subject: 'must still go out', html: '<p>two</p>' });
