@@ -373,7 +373,8 @@ async function main() {
 
         await section('Driver pages', async () => {
             const driver = await actor();
-            await uiLogin(driver, ACCOUNTS.driver, '/dashboard/driver');
+            // Drivers sign in from an owner account, so the login form lands them on the owner dashboard.
+            await uiLogin(driver, ACCOUNTS.driver, '/dashboard/owner');
             await visit(driver, '/dashboard/driver');
             await step(driver, 'Driver dashboard lists the vehicle and toggles availability through the API', async () => {
                 const { page } = driver;
