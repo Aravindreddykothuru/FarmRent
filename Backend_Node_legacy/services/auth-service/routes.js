@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { loginLimiter } = require('../../middleware/redisRateLimiter');
-const { otpSendLimiter, otpVerifyLimiter, passwordResetLimiter } = require('../../middleware/slidingWindowRateLimiter');
+const { otpSendLimiter, otpVerifyLimiter, passwordResetLimiter, loginIpLimiter } = require('../../middleware/slidingWindowRateLimiter');
 
 const {
     register,
@@ -74,8 +74,10 @@ router.get('/check-availability', async (req, res) => {
 });
 
 // ── Core auth ───────────────────────────────────────────────────────────────
-router.post('/register', loginLimiter, validate(registerSchema), register);
-router.post('/login', loginLimiter, validate(loginSchema), login);
+// Two counters, on purpose: loginLimiter is per IP *and* account, so neighbours sharing a village connection
+// do not lock each other out, and loginIpLimiter caps what any single IP can do across all accounts.
+router.post('/register', loginIpLimiter, loginLimiter, validate(registerSchema), register);
+router.post('/login', loginIpLimiter, loginLimiter, validate(loginSchema), login);
 router.get('/me', auth(true), me);
 router.post('/refresh', refreshAccessToken);
 // No auth middleware: signing out must also work once the access token has expired (see the controller).

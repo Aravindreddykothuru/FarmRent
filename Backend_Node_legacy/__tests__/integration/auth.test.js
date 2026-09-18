@@ -185,6 +185,20 @@ describe('authentication', () => {
         expect(statuses).toEqual(Array(15).fill(200));
     });
 
+    test('sign-in limits are per account, so one shared connection does not lock out a neighbour', async () => {
+        // Both farmers reach the API from the same address — a village Wi-Fi, a carrier NAT, 127.0.0.1 here.
+        const [one, two] = [await createUser('farmer'), await createUser('farmer')];
+        const signIn = (user) => request(getApp()).post('/api/v1/auth/login').send({ email: user.email, password: PASSWORD });
+
+        const statuses = [];
+        for (let i = 0; i < 21; i += 1) statuses.push((await signIn(one)).status);
+        expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true);
+        expect(statuses[20]).toBe(429);
+
+        // The neighbour has spent nothing: same IP, their own counter.
+        expect((await signIn(two)).status).toBe(200);
+    });
+
     test('non-admins cannot reach admin endpoints', async () => {
         const agent = await login(await createUser('owner'));
         const res = await agent.get('/api/v1/admin/users').expect(403);
