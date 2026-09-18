@@ -76,6 +76,19 @@ function shouldUseResend() {
     return true;
 }
 
+const isProduction = () => process.env.NODE_ENV === 'production';
+
+/**
+ * True when a provider that can reach a real inbox is configured.
+ *
+ * Everything the developer conveniences below exist for — Ethereal's fake mailbox, the in-memory dev inbox, the
+ * reset link handed straight back in the API response — is for a machine that has no such provider. None of
+ * them may stand in for one that is configured, or "the email works" stops meaning anything.
+ */
+function hasRealProvider() {
+    return isBrevoConfigured() || isSmtpConfigured() || shouldUseResend();
+}
+
 function providerOrder() {
     const preferred = (process.env.EMAIL_PROVIDER || 'brevo').toLowerCase();
     const all = {
@@ -97,6 +110,9 @@ function providerOrder() {
             if (fn === sendViaResend) return shouldUseResend();
             if (fn === sendViaBrevo) return isBrevoConfigured();
             if (fn === sendViaSmtp) return isSmtpConfigured();
+            // Ethereal is a fake mailbox only a developer can read. It is a last resort where nothing real is
+            // configured — never a silent substitute for a provider that is, and never in production.
+            if (fn === sendViaEthereal) return !isProduction() && !hasRealProvider();
             return true;
         });
 }
@@ -140,6 +156,24 @@ async function sendViaResend({ to, subject, html, attachments }) {
     }
 }
 
+// No mail call may hang. Nodemailer waits for ever by default, and a socket that never answers used to leave
+// the queue's drain flag set — after which every later email sat in an array nobody drained, while callers
+// were told the message had been accepted.
+const SMTP_TIMEOUTS = { connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 20_000 };
+// Overridable so tests can drive the backstop in milliseconds instead of waiting out the real bound.
+const MEMORY_SEND_TIMEOUT_MS = Number(process.env.EMAIL_SEND_TIMEOUT_MS) || 30_000;
+
+/** Rejects if `promise` has not settled within `ms`, so one stalled network call cannot block the queue. */
+function withTimeout(promise, ms, what) {
+    let timer;
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms);
+        }),
+    ]).finally(() => clearTimeout(timer));
+}
+
 // ── Provider: Brevo SMTP (free 300/day, no domain verification needed) ────────
 
 async function sendViaBrevo({ to, subject, html, attachments }) {
@@ -159,6 +193,7 @@ async function sendViaBrevo({ to, subject, html, attachments }) {
             port: 587,
             secure: false,
             auth: { user: BREVO_SMTP_USER, pass: BREVO_SMTP_PASS },
+            ...SMTP_TIMEOUTS,
         });
         await transporter.sendMail({ from: senderEmail, to, subject, html, attachments });
         logger.info('[email/brevo] Sent', { to, subject });
@@ -180,6 +215,7 @@ function buildSmtpTransport() {
         port: creds.port,
         secure: creds.port === 465,
         auth: { user: creds.user, pass: creds.pass },
+        ...SMTP_TIMEOUTS,
     });
 }
 
@@ -206,7 +242,8 @@ async function getEtherealAccount() {
     if (_etherealAccount) return _etherealAccount;
     if (!nodemailer) return null;
     try {
-        _etherealAccount = await nodemailer.createTestAccount();
+        // Creating a test account is a network call like any other, and it runs before the first dev email.
+        _etherealAccount = await withTimeout(nodemailer.createTestAccount(), 10_000, 'ethereal account creation');
         return _etherealAccount;
     } catch {
         return null;
@@ -224,6 +261,7 @@ async function sendViaEthereal({ to, subject, html, attachments }) {
             port: 587,
             secure: false,
             auth: { user: account.user, pass: account.pass },
+            ...SMTP_TIMEOUTS,
         });
 
         const info = await transporter.sendMail({
@@ -267,8 +305,9 @@ let emailWorker = null;
 async function sendActual({ to, subject, html, attachments }) {
     if (!to) return false;
 
-    // Always capture in dev store so /dev/emails works regardless of provider
-    devStore.store({ to, subject, html, attachments });
+    // The dev inbox is for machines with no real provider. Where one is configured the message goes to the real
+    // mailbox and nothing is stashed locally, so /api/dev/emails can never be mistaken for proof of delivery.
+    if (!isProduction() && !hasRealProvider()) devStore.store({ to, subject, html, attachments });
 
     for (const provider of providerOrder()) {
         if (await provider({ to, subject, html, attachments })) return true;
@@ -399,7 +438,12 @@ let isProcessingMemoryEmails = false;
 function triggerMemoryEmailWorker() {
     if (isProcessingMemoryEmails) return;
     isProcessingMemoryEmails = true;
-    processNextMemoryEmail();
+    processNextMemoryEmail().catch((err) => {
+        // The drain must never die still holding the flag: that is what silently disables email for the rest
+        // of the process's life, with every caller still being told delivery was accepted.
+        isProcessingMemoryEmails = false;
+        logger.error('[email-queue] Memory email worker stopped unexpectedly', { error: err.message });
+    });
 }
 
 async function processNextMemoryEmail() {
@@ -409,11 +453,14 @@ async function processNextMemoryEmail() {
         return;
     }
     try {
-        await sendActual(task);
+        // Bounded twice over: each provider has its own socket timeouts, and this is the backstop for anything
+        // that still fails to settle. One stalled send must not cost every later email.
+        await withTimeout(sendActual(task), MEMORY_SEND_TIMEOUT_MS, `email to ${task.to}`);
     } catch (err) {
-        logger.error('[email-queue] Memory email sending failed:', { error: err.message });
+        logger.error('[email-queue] Memory email sending failed:', { to: task.to, subject: task.subject, error: err.message });
+    } finally {
+        setImmediate(processNextMemoryEmail);
     }
-    setImmediate(processNextMemoryEmail);
 }
 
 async function send({ to, subject, html, attachments }) {
@@ -450,6 +497,23 @@ async function send({ to, subject, html, attachments }) {
         memoryEmailQueue.push({ to, subject, html, attachments: serializableAttachments });
         triggerMemoryEmailWorker();
         return true;
+    }
+}
+
+/**
+ * Sends without the queue and reports what actually happened.
+ *
+ * A queued send can only ever report "accepted", which is no use to a caller that has to tell someone their
+ * reset link is on the way — or refuse the request when it is not. Mail whose outcome the caller must know
+ * goes through here; everything else can be queued.
+ */
+async function sendNow({ to, subject, html, attachments }) {
+    if (!to) return false;
+    try {
+        return await withTimeout(sendActual({ to, subject, html, attachments }), MEMORY_SEND_TIMEOUT_MS, `email to ${to}`);
+    } catch (err) {
+        logger.error('[email] Direct send failed', { to, subject, error: err.message });
+        return false;
     }
 }
 
@@ -493,7 +557,9 @@ async function sendVerificationEmail(userEmail, { userName, link }) {
 }
 
 async function sendPasswordResetEmail(userEmail, { userName, link }) {
-    return send({
+    // Sent directly rather than queued, so the caller learns whether it really went out and can refuse the
+    // request instead of telling someone to check an inbox nothing was sent to.
+    return sendNow({
         to: userEmail,
         subject: '🔐 Reset your FarmRent password',
         html: base(`
@@ -610,6 +676,8 @@ async function sendInvoiceEmail(userEmail, { userName, bookingId, pdfBuffer }) {
 
 module.exports = {
     send,
+    sendNow,
+    hasRealProvider,
     sendVerificationEmail,
     sendPasswordResetEmail,
     sendBookingConfirmation,

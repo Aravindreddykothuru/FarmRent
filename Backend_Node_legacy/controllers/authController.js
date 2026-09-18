@@ -554,7 +554,9 @@ exports.forgotPassword = async (req, res, next) => {
         const link = `${appUrl()}/reset-password?token=${token}`;
 
         const delivered = await emailService.sendPasswordResetEmail(user.email, { userName: user.full_name, link });
-        if (!delivered && isProduction()) {
+        // Wherever mail can really be sent, a failure to send is a failure of the request: the token is dropped
+        // and the caller is told, rather than someone being sent to watch an inbox nothing is coming to.
+        if (!delivered && (isProduction() || emailService.hasRealProvider())) {
             await redisDel(`pwreset:${token}`);
             return res.status(503).json({ code: 'EMAIL_UNAVAILABLE', error: 'Could not send reset email. Please try again later.' });
         }
@@ -569,7 +571,9 @@ exports.forgotPassword = async (req, res, next) => {
 
         logger.info('[auth/forgot-password] reset email', { email: user.email.replace(/(.{2}).*(@.*)/, '$1***$2'), delivered });
 
-        if (!isProduction()) {
+        // The link is handed back only on a machine that cannot send mail at all. Once a provider is configured
+        // the email is the only way to it, in development as much as in production.
+        if (!isProduction() && !emailService.hasRealProvider()) {
             return res.json({ ...genericResponse, devResetLink: link, emailDelivered: delivered });
         }
         return res.json(genericResponse);
