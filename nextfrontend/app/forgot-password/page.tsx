@@ -80,11 +80,10 @@ export default function ForgotPasswordPage() {
                 setError(t('forgotPassword.noAccountPhone'));
                 return;
             }
-            if (isEmail) {
-                setStage('sent');
-            } else {
-                setError(t('common.error'));
-            }
+            // A failed request is a failure, not a quiet success. Whether an account exists is already hidden by
+            // the server, which answers the same way either way, so there is nothing left to protect by
+            // pretending — and pretending is what told people to watch an inbox nothing had been sent to.
+            setError(err instanceof Error && err.message ? err.message : t('common.error'));
         } finally {
             setBusy(false);
         }
