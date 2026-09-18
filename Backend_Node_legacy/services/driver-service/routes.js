@@ -164,7 +164,7 @@ async function driverTransition(req, action, verify) {
     const driver = await driverForUser(req.user.id);
     const { data: booking, error } = await db()
         .from('equipment_rentals')
-        .select('id, renter_id, owner_id, driver_id, status, started_at')
+        .select('id, renter_id, owner_id, driver_id, status, started_at, payment_method, payment_status')
         .eq('id', bookingId)
         .maybeSingle();
     if (error) throw error;
@@ -199,7 +199,12 @@ router.post(
     auth(true),
     validate(driverTripStartSchema),
     asyncHandler(async (req, res) => {
-        const { updated } = await driverTransition(req, 'start');
+        // Same gate as the owner's hand-over: an online booking is delivered only once it is paid.
+        const { updated } = await driverTransition(req, 'start', (booking) => {
+            if (booking.payment_method === 'razorpay' && booking.payment_status !== 'paid') {
+                throw new HttpError(409, 'PAYMENT_REQUIRED', 'The renter has not paid for this booking yet.');
+            }
+        });
         return res.json({ success: true, data: updated });
     }),
 );

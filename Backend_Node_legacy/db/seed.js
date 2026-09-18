@@ -24,6 +24,8 @@ const USERS = [
     { email: 'owner2@farmrent.local', name: 'Lakshmi Devi', phone: '9000000003', role: 3, district: 'Guntur', state: 'Andhra Pradesh' },
     { email: 'farmer1@farmrent.local', name: 'Suresh Reddy', phone: '9000000004', role: 1, district: 'Anantapur', state: 'Andhra Pradesh' },
     { email: 'farmer2@farmrent.local', name: 'Meena Patil', phone: '9000000005', role: 1, district: 'Nashik', state: 'Maharashtra' },
+    // Drivers register from an owner account (services/driver-service/routes.js).
+    { email: 'driver1@farmrent.local', name: 'Naveen Driver', phone: '9000000006', role: 3, district: 'Guntur', state: 'Andhra Pradesh' },
 ];
 
 // id, owner email, name, category, brand, daily rate, district, state, pincode, lat, lng
@@ -164,6 +166,16 @@ async function seed(connectionString) {
                 ],
             );
         }
+
+        // A driver parked beside owner2's Guntur yard, so bookings there have someone to deliver them.
+        await client.query(
+            `INSERT INTO drivers (user_id, name, phone, vehicle_name, vehicle_type, vehicle_number, license_number,
+                                  is_available, location_sharing, current_lat, current_lng)
+             VALUES ($1, $2, $3, 'Mahindra Bolero Pickup', 'pickup', 'AP07TD4412', 'DLAP0720250001', TRUE, TRUE, 16.3105, 80.4392)
+             ON CONFLICT (user_id) DO UPDATE SET is_available = TRUE, location_sharing = TRUE,
+                 current_lat = EXCLUDED.current_lat, current_lng = EXCLUDED.current_lng`,
+            [userIds['driver1@farmrent.local'], 'Naveen Driver', '9000000006'],
+        );
 
         for (const [code, label, type, value, minOrder, maxDiscount, usageLimit] of PROMO_CODES) {
             await client.query(

@@ -25,7 +25,12 @@ const option = (name, fallback) => {
 const BASE_URL = option('--base-url', process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 const ORIGIN = new URL(BASE_URL).origin;
 const PASSWORD = process.env.SEED_PASSWORD || 'FarmRent@2026';
-const ACCOUNTS = { renter: 'farmer1@farmrent.local', owner: 'owner2@farmrent.local', admin: 'admin@farmrent.local' };
+const ACCOUNTS = {
+    renter: 'farmer1@farmrent.local',
+    owner: 'owner2@farmrent.local',
+    admin: 'admin@farmrent.local',
+    driver: 'driver1@farmrent.local',
+};
 const OWNER_EQUIPMENT = '5b6d8c1e-0001-4a3b-9c2d-000000000005'; // seeded, owned by owner2
 const OTHER_EQUIPMENT = '5b6d8c1e-0001-4a3b-9c2d-000000000001'; // seeded, owned by owner1
 const NAV_TIMEOUT = 120_000; // the first request for a page compiles it when the server runs in dev mode
@@ -364,6 +369,18 @@ async function main() {
             await visit(owner, '/dashboard/driver/register');
             await visit(owner, '/dashboard/driver', { allowPaths: ['/dashboard/driver/register'] });
             await visit(owner, '/driver', { allowPaths: ['/dashboard/driver/register'] });
+        });
+
+        await section('Driver pages', async () => {
+            const driver = await actor();
+            await uiLogin(driver, ACCOUNTS.driver, '/dashboard/driver');
+            await visit(driver, '/dashboard/driver');
+            await step(driver, 'Driver dashboard lists the vehicle and toggles availability through the API', async () => {
+                const { page } = driver;
+                await page.getByText('AP07TD4412').waitFor({ timeout: 30_000 });
+                await clickAndWait(page, page.getByRole('button', { name: /Online|Offline/i }), ['PATCH'], '/api/v1/drivers/availability');
+                return 'vehicle listed; availability toggled';
+            });
         });
 
         await section('Admin pages', async () => {

@@ -47,9 +47,13 @@ export default function DriverDashboard() {
     const [online, setOnline]           = useState(false);
     const [togglingOnline, setToggling] = useState(false);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
+    // Completion code the renter reads out at the end of the trip
+    const [showTripOtp, setShowTripOtp]  = useState(false);
+    const [tripOtp, setTripOtp]          = useState('');
 
-    // Active booking = first in_progress or accepted
-    const activeBooking = bookings.find(b => ['accepted', 'in_progress'].includes(b.status)) || null;
+    // Active booking = the first the owner has confirmed, or one already under way.
+    // These are the status names the API returns (booking-service/lifecycle.js maps them for the client).
+    const activeBooking = bookings.find(b => ['confirmed', 'in_progress'].includes(b.status)) || null;
 
     // Driver GPS hook — only transmits when online and has an active booking
     const { position, error: gpsError, isTransmitting } = useDriverGPS(
@@ -102,41 +106,31 @@ export default function DriverDashboard() {
         }
     };
 
-    // Accept booking
-    const handleAccept = async (bookingId: string) => {
-        setActionLoading(bookingId + '_accept');
-        try {
-            await nodeApi.patch(`/bookings/${bookingId}/accept`, {});
-            toast.success(t('driver.bookingAccepted'));
-            loadBookings();
-        } catch { toast.error(t('driver.failedAccept')); }
-        finally { setActionLoading(null); }
-    };
-
-    // Start trip
+    // Start the trip. Drivers move the rental through the same lifecycle as the owner, on their own endpoint.
     const handleStart = async (bookingId: string) => {
         setActionLoading(bookingId + '_start');
         try {
-            await nodeApi.patch(`/bookings/${bookingId}/start`, {});
+            await nodeApi.post('/drivers/trip/start', { booking_id: bookingId });
             toast.success(t('driver.tripStarted'));
             loadBookings();
-        } catch { toast.error(t('driver.failedStart')); }
+        } catch (e: unknown) { toast.error(e instanceof Error ? e.message : t('driver.failedStart')); }
         finally { setActionLoading(null); }
     };
 
     // Complete trip — like the owner, the driver needs the code shown on the renter's booking page
     const handleComplete = async (bookingId: string) => {
-        const otp = window.prompt("Enter the renter's 6-digit completion code")?.trim() ?? '';
-        if (!/^\d{6}$/.test(otp)) {
+        if (!/^\d{6}$/.test(tripOtp)) {
             toast.error("Enter the 6-digit completion code from the renter's booking page");
             return;
         }
         setActionLoading(bookingId + '_complete');
         try {
-            await nodeApi.post('/drivers/trip/end', { booking_id: bookingId, otp });
+            await nodeApi.post('/drivers/trip/end', { booking_id: bookingId, otp: tripOtp });
             toast.success(t('driver.tripCompleted'));
+            setShowTripOtp(false);
+            setTripOtp('');
             loadBookings();
-        } catch { toast.error(t('driver.failedComplete')); }
+        } catch (e: unknown) { toast.error(e instanceof Error ? e.message : t('driver.failedComplete')); }
         finally { setActionLoading(null); }
     };
 
@@ -146,7 +140,8 @@ export default function DriverDashboard() {
         </div>
     );
 
-    const pending     = bookings.filter(b => b.status === 'requested');
+    // Assigned to this driver but not yet confirmed by the owner — the driver cannot act on these yet.
+    const pending     = bookings.filter(b => b.status === 'pending');
     const completed   = bookings.filter(b => b.status === 'completed');
     const earnings    = completed.reduce((s, b) => s + (b.total_amount || 0), 0);
 
@@ -238,7 +233,7 @@ export default function DriverDashboard() {
                         </div>
 
                         <div className="flex gap-2 pt-1">
-                            {activeBooking.status === 'accepted' && (
+                            {activeBooking.status === 'confirmed' && (
                                 <button
                                     type="button"
                                     suppressHydrationWarning
@@ -251,20 +246,56 @@ export default function DriverDashboard() {
                                     {t('driver.startTrip')}
                                 </button>
                             )}
-                            {activeBooking.status === 'in_progress' && (
+                            {activeBooking.status === 'in_progress' && !showTripOtp && (
                                 <button
                                     type="button"
                                     suppressHydrationWarning
-                                    onClick={() => handleComplete(activeBooking.id)}
+                                    onClick={() => setShowTripOtp(true)}
                                     disabled={!!actionLoading}
                                     className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-semibold transition-colors">
-                                    {actionLoading === activeBooking.id + '_complete'
-                                        ? <Loader2 className="w-4 h-4 animate-spin" />
-                                        : <Flag className="w-4 h-4" />}
+                                    <Flag className="w-4 h-4" />
                                     {t('driver.completeTrip')}
                                 </button>
                             )}
                         </div>
+
+                        {activeBooking.status === 'in_progress' && showTripOtp && (
+                            <div className="space-y-3 border-t pt-3">
+                                <p className="text-sm font-bold text-gray-800">Enter the renter&apos;s completion code</p>
+                                <p className="text-xs text-gray-500">Ask the farmer for the 6-digit code shown on their booking page.</p>
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    aria-label="Completion code"
+                                    placeholder="6-digit code"
+                                    value={tripOtp}
+                                    maxLength={6}
+                                    suppressHydrationWarning
+                                    onChange={e => setTripOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-center text-2xl font-mono font-black tracking-[0.75rem] focus:outline-none focus:border-green-500"
+                                />
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        suppressHydrationWarning
+                                        onClick={() => { setShowTripOtp(false); setTripOtp(''); }}
+                                        className="flex-1 border border-gray-300 text-gray-600 py-2.5 rounded-xl font-medium text-sm hover:bg-gray-50 transition-colors">
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        suppressHydrationWarning
+                                        onClick={() => handleComplete(activeBooking.id)}
+                                        disabled={tripOtp.length !== 6 || !!actionLoading}
+                                        className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white py-2.5 rounded-xl font-semibold text-sm transition-colors">
+                                        {actionLoading === activeBooking.id + '_complete'
+                                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                                            : <Flag className="w-4 h-4" />}
+                                        Confirm complete
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -273,7 +304,7 @@ export default function DriverDashboard() {
                     <div className="space-y-3">
                         <h2 className="font-bold text-gray-800 flex items-center gap-2">
                             <AlertCircle className="w-4 h-4 text-amber-500" />
-                            {t('driver.newRequests')} ({pending.length})
+                            Assigned to you ({pending.length})
                         </h2>
                         {pending.map(b => (
                             <div key={b.id} className="bg-white rounded-2xl shadow-sm border p-4 space-y-3">
@@ -290,29 +321,11 @@ export default function DriverDashboard() {
                                         {b.eta_minutes && <span>⏱ {t('driver.etaMin', { min: String(b.eta_minutes) })}</span>}
                                     </div>
                                 )}
-                                <div className="flex gap-2">
-                                    <button
-                                        type="button"
-                                        suppressHydrationWarning
-                                        onClick={() => handleAccept(b.id)}
-                                        disabled={!!actionLoading}
-                                        className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl font-medium text-sm transition-colors">
-                                        {actionLoading === b.id + '_accept'
-                                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                            : <CheckCircle2 className="w-3.5 h-3.5" />}
-                                        {t('driver.accept')}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        suppressHydrationWarning
-                                        onClick={async () => {
-                                            await nodeApi.patch(`/bookings/${b.id}/cancel`, {});
-                                            loadBookings();
-                                        }}
-                                        className="flex-1 border border-gray-300 text-gray-600 py-2.5 rounded-xl font-medium text-sm hover:bg-gray-50 transition-colors">
-                                        {t('driver.decline')}
-                                    </button>
-                                </div>
+                                {/* A driver cannot accept or decline: only the owner confirms a rental request. */}
+                                <p className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 rounded-xl px-3 py-2">
+                                    <Clock className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                                    Waiting for the owner to confirm. You can start this trip once they do.
+                                </p>
                             </div>
                         ))}
                     </div>

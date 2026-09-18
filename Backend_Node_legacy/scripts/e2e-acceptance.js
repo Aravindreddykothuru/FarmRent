@@ -132,6 +132,18 @@ async function resetRateLimits() {
     }
 }
 
+/** Takes every registered driver off the road and empties the geo index, so only this run's driver is near. */
+async function parkAllDrivers() {
+    await withDb((db) => db.query('UPDATE drivers SET is_available = FALSE'));
+    const client = createClient({ url: process.env.REDIS_URL });
+    await client.connect();
+    try {
+        await client.del('drivers:geo');
+    } finally {
+        await client.quit();
+    }
+}
+
 async function register(actor, role, name) {
     const email = `e2e.${role}.${Date.now()}.${crypto.randomBytes(2).toString('hex')}@farmrent.test`;
     const phone = `9${String(crypto.randomInt(0, 1e9)).padStart(9, '0')}`;
@@ -181,6 +193,7 @@ async function main() {
     const owner = new Actor('owner');
     const secondRenter = new Actor('second renter');
     const admin = new Actor('admin');
+    const driverActor = new Actor('driver');
     const state = {};
 
     await step('1', 'Full stack is up: API, database and web app respond', async () => {
@@ -416,7 +429,95 @@ async function main() {
     });
 
     await resetRateLimits();
-    await step('14', 'Logout: protected API calls and pages are denied afterwards', async () => {
+    await step('14', 'A free driver near the pickup point is assigned to a new delivery booking', async () => {
+        state.driver = await register(driverActor, 'owner', 'E2E Driver');
+        // Drivers left behind by earlier runs sit at these coordinates too and would be drawn first.
+        await parkAllDrivers();
+        expectStatus(
+            await driverActor.call('POST', '/api/v1/drivers/register', {
+                vehicle_name: 'Mahindra Pickup',
+                vehicle_type: 'pickup',
+                vehicle_number: `AP${crypto.randomInt(10, 99)}XX${crypto.randomInt(1000, 9999)}`,
+            }),
+            201,
+            'driver profile',
+        );
+        expectStatus(await driverActor.call('PATCH', '/api/v1/drivers/availability', { is_available: true }), 200, 'driver online');
+        expectStatus(await driverActor.call('PATCH', '/api/v1/drivers/share-location', { sharing: true }), 200, 'driver sharing location');
+        expectStatus(
+            await driverActor.call('PATCH', '/api/v1/drivers/location', { latitude: 14.6835, longitude: 77.6025, accuracy: 8 }),
+            200,
+            'driver location',
+        );
+        state.driverId = expectStatus(await driverActor.call('GET', '/api/v1/drivers/me'), 200, 'driver profile read').data.id;
+
+        const res = expectStatus(
+            await renter.call('POST', '/api/v1/bookings', {
+                machineId: state.machineId,
+                startDate: isoDate(30),
+                endDate: isoDate(31),
+                paymentMethod: 'cod',
+                deliveryMode: 'delivery',
+                fieldAddress: 'Survey 45, Rampur',
+            }),
+            201,
+            'delivery booking',
+        );
+        state.tripBookingId = res.data.id;
+
+        // Assignment is best-effort and runs after the booking response has been sent.
+        const deadline = Date.now() + 8000;
+        let assigned = null;
+        while (!assigned && Date.now() < deadline) {
+            const { rows } = await withDb((db) => db.query('SELECT driver_id FROM equipment_rentals WHERE id = $1', [state.tripBookingId]));
+            assigned = rows[0]?.driver_id || null;
+            if (!assigned) await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+        check(assigned === state.driverId, `booking was not assigned to this run's driver (got ${assigned})`);
+        return [`driver ${state.driverId} assigned to booking ${state.tripBookingId}`];
+    });
+
+    await step('15', "Driver delivers the rental and closes it with the renter's completion code", async () => {
+        const trip = `/api/v1/bookings/${state.tripBookingId}`;
+        // A driver is not a second owner: confirming the request is the owner's decision.
+        expectStatus(await driverActor.call('PATCH', `${trip}/accept`), 403, 'driver accepting');
+        expectStatus(
+            await driverActor.call('POST', '/api/v1/drivers/trip/start', { booking_id: state.tripBookingId }),
+            409,
+            'trip started before confirmation',
+        );
+
+        expectStatus(await owner.call('PATCH', `${trip}/accept`), 200, 'owner confirms');
+        const started = expectStatus(
+            await driverActor.call('POST', '/api/v1/drivers/trip/start', { booking_id: state.tripBookingId }),
+            200,
+            'trip start',
+        );
+        check(started.data.status === 'in_progress', 'trip did not start');
+
+        const code = expectStatus(await renter.call('GET', `${trip}/completion-otp`), 200, 'completion code').data.otp;
+        expectStatus(
+            await driverActor.call('POST', '/api/v1/drivers/trip/end', {
+                booking_id: state.tripBookingId,
+                otp: code === '123456' ? '654321' : '123456',
+            }),
+            400,
+            'wrong completion code',
+        );
+        const ended = expectStatus(
+            await driverActor.call('POST', '/api/v1/drivers/trip/end', { booking_id: state.tripBookingId, otp: code }),
+            200,
+            'trip end',
+        );
+        check(ended.data.status === 'completed', 'trip not completed');
+
+        const { rows } = await withDb((db) => db.query('SELECT is_available, total_trips FROM drivers WHERE id = $1', [state.driverId]));
+        check(rows[0].is_available === true && rows[0].total_trips >= 1, 'driver not released, or the trip was not counted');
+        return [`confirmed → in_progress → completed; driver free again after ${rows[0].total_trips} trip(s)`];
+    });
+
+    await resetRateLimits();
+    await step('16', 'Logout: protected API calls and pages are denied afterwards', async () => {
         const oldToken = renter.cookies.get('token');
         expectStatus(await renter.call('POST', '/api/v1/auth/logout'), 200, 'logout');
         check(!renter.cookies.has('token'), 'token cookie not cleared');
@@ -436,7 +537,7 @@ async function main() {
     });
 
     await resetRateLimits();
-    await step('15', 'Admin workflow: dashboard, users, listing moderation; non-admins refused', async () => {
+    await step('17', 'Admin workflow: dashboard, users, listing moderation; non-admins refused', async () => {
         await login(admin, ADMIN_EMAIL, ADMIN_PASSWORD);
         const dashboard = expectStatus(await admin.call('GET', '/api/v1/admin/dashboard'), 200, 'admin dashboard');
         const totals = dashboard.data.overview;
@@ -465,6 +566,6 @@ main()
     })
     .finally(() => {
         const passed = results.filter((r) => r.ok).length;
-        console.log(`\n${passed}/${results.length} steps passed${results.length < 15 ? ' (run stopped at the first failure)' : ''}`);
-        process.exit(passed === 15 ? 0 : 1);
+        console.log(`\n${passed}/${results.length} steps passed${results.length < 17 ? ' (run stopped at the first failure)' : ''}`);
+        process.exit(passed === 17 ? 0 : 1);
     });
