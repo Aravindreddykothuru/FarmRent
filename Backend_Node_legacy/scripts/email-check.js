@@ -83,6 +83,8 @@ async function checkMsg91() {
     try {
         const res = await fetch('https://control.msg91.com/api/v5/email/send', {
             method: 'POST',
+            // Over IPv4, as the application sends: MSG91 whitelists IPv4, and a request over IPv6 is refused (418).
+            dispatcher: new (require('undici').Agent)({ connect: { family: 4 } }),
             headers: {
                 authkey: process.env.MSG91_AUTH_KEY,
                 'content-type': 'application/json',

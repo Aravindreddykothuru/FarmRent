@@ -276,6 +276,20 @@ function isMsg91Configured() {
     return Boolean(process.env.MSG91_AUTH_KEY && process.env.MSG91_DOMAIN && process.env.MSG91_FROM_EMAIL);
 }
 
+// MSG91 whitelists callers by IPv4 address, but its API also answers over IPv6 and Node tries IPv6 first whenever
+// the machine has it. On such a network every request arrives from an IPv6 address — often a temporary one that
+// changes every few hours — so a correctly whitelisted key is refused (401, apiError 418) whatever IPv4 is listed.
+// Pinning these requests to IPv4 makes the whitelist mean what it says. Only MSG91 is affected; nothing else
+// the application connects to changes.
+let msg91Ipv4Agent = null;
+function msg91Dispatcher() {
+    if (!msg91Ipv4Agent) {
+        const { Agent } = require('undici');
+        msg91Ipv4Agent = new Agent({ connect: { family: 4 } });
+    }
+    return msg91Ipv4Agent;
+}
+
 async function sendViaMsg91({ to, subject, template }) {
     if (!isMsg91Configured()) return false;
 
@@ -302,6 +316,7 @@ async function sendViaMsg91({ to, subject, template }) {
             headers: { authkey: process.env.MSG91_AUTH_KEY, 'content-type': 'application/json', accept: 'application/json' },
             body: JSON.stringify(body),
             signal: controller.signal,
+            dispatcher: msg91Dispatcher(),
         });
         const text = await res.text();
         if (!res.ok) {

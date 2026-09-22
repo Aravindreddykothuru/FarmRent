@@ -51,7 +51,7 @@ beforeEach(() => {
     mockSendMail.mockResolvedValue({ messageId: '<smtp>' });
     msg91Requests = [];
     global.fetch = jest.fn(async (url, init) => {
-        msg91Requests.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+        msg91Requests.push({ url, headers: init.headers, body: JSON.parse(init.body), dispatcher: init.dispatcher });
         return { ok: true, status: 200, text: async () => '{"message":"success"}' };
     });
 });
@@ -136,6 +136,17 @@ describe('provider failover', () => {
         expect(emailService.hasRealProvider()).toBe(true);
         await expect(emailService.sendNow(templated())).resolves.toBe(true);
         expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('MSG91 requests go over IPv4, so an IPv4 whitelist is what MSG91 checks', async () => {
+        process.env.EMAIL_PROVIDERS = 'msg91,smtp';
+
+        await expect(emailService.sendNow(templated())).resolves.toBe(true);
+
+        // Left to itself Node prefers IPv6, and MSG91 then refuses a whitelisted key with apiError 418.
+        const { dispatcher } = msg91Requests[0];
+        expect(dispatcher).toBeDefined();
+        expect(dispatcher.constructor.name).toBe('Agent');
     });
 
     test('when every provider refuses, the send reports failure', async () => {
