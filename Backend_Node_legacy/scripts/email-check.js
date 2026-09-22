@@ -92,23 +92,43 @@ async function checkMsg91() {
                 recipients: [{ to: [{ name: 'check', email: process.env.MSG91_FROM_EMAIL }] }],
                 from: { name: process.env.MSG91_FROM_NAME || 'FarmRent', email: process.env.MSG91_FROM_EMAIL },
                 domain: process.env.MSG91_DOMAIN,
-                template_id: process.env.MSG91_RESET_TEMPLATE_ID || '',
+                // Never a real template: this is a credential check, and with a working template it would send.
+                template_id: '',
             }),
             signal: controller.signal,
         });
-        const text = (await res.text()).slice(0, 200);
+        const text = await res.text();
         if (res.status === 401 || res.status === 403) {
-            return { name, configured: true, reachable: false, detail: `authentication refused (${res.status}): ${text}` };
+            // MSG91 turns API security on by default: a valid key called from an address missing from its whitelist
+            // gets 401 with apiError 418, which reads exactly like a bad key unless the two are told apart.
+            const ipBlocked = /"apiError"\s*:\s*"?418/.test(text);
+            return {
+                name,
+                configured: true,
+                reachable: false,
+                detail: ipBlocked
+                    ? 'key refused from this IP (apiError 418) — whitelist this machine in MSG91 → Authkey → Whitelisted IPs, or turn API security off'
+                    : `authentication refused (${res.status}): ${text.slice(0, 200)}`,
+            };
+        }
+        // With no template MSG91 answers 422 and lists what is missing. A complaint about the domain means it is not
+        // verified for this account; complaints only about the template and body mean key and domain are both good.
+        let errors = {};
+        try {
+            errors = JSON.parse(text).errors || {};
+        } catch {
+            /* not JSON: judged by the status alone */
+        }
+        if (errors.domain) {
+            return { name, configured: true, reachable: false, detail: `domain not accepted: ${[].concat(errors.domain).join(' ')}` };
         }
         return {
             name,
             configured: true,
             reachable: true,
-            detail: `API answered ${res.status} for domain ${process.env.MSG91_DOMAIN}`,
+            detail: `key accepted, domain ${process.env.MSG91_DOMAIN} verified for this account`,
             warning: filled('MSG91_RESET_TEMPLATE_ID')
-                ? res.ok
-                    ? null
-                    : `template rejected: ${text}`
+                ? null
                 : 'MSG91_RESET_TEMPLATE_ID is unset — password resets will fall through to SMTP',
         };
     } catch (e) {
