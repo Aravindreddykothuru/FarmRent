@@ -1,0 +1,94 @@
+# Render Blueprint for FarmRent.
+#
+# One web service runs the whole application — pages, API and live tracking — from the Dockerfile, alongside a
+# Key Value (Redis) instance for sessions, rate limits and the email queue. The database is a Supabase project
+# (Postgres with PostGIS and the REST layer the API talks to), created outside Render.
+#
+# Nothing secret lives in this file. Every value marked `sync: false` is asked for when the Blueprint is created
+# in the Render dashboard, and stays there.
+services:
+  - type: web
+    name: farmrent
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: audit/farmrent-refactor
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Render's proxy sits in front of the app. Without this every visitor appears to come from one address,
+      # and the per-IP rate limits lock everyone out together after a handful of sign-ins.
+      - key: TRUST_PROXY
+        value: "1"
+
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: farmrent-redis
+          property: connectionString
+
+      # Session signing keys, generated once by Render. Changing them signs everyone out.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+
+      # Supabase — the project URL, its service_role key, and the Session pooler connection string. The pooler
+      # matters: Supabase's direct connection is IPv6-only, and Render connects out over IPv4.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+
+      # The public address: used for links in emails, and as the list of sites allowed to call the API. The
+      # onrender.com address is included so the site works before the domain is connected.
+      - key: APP_URL
+        value: https://farmrentcom.in
+      - key: CLIENT_URL
+        value: https://farmrentcom.in
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://farmrentcom.in
+      - key: ALLOWED_ORIGINS
+        value: https://farmrentcom.in,https://www.farmrentcom.in,https://farmrent.onrender.com
+
+      # Email: MSG91 first, Gmail SMTP when MSG91 refuses or fails.
+      - key: EMAIL_PROVIDERS
+        value: msg91,smtp
+      - key: EMAIL_PROVIDER
+        value: smtp
+      - key: EMAIL_FROM
+        value: FarmRent <farmrent862@gmail.com>
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        value: farmrent862@gmail.com
+      - key: SMTP_PASS
+        sync: false
+      - key: MSG91_AUTH_KEY
+        sync: false
+      - key: MSG91_DOMAIN
+        value: farmrentcom.in
+      - key: MSG91_FROM_EMAIL
+        value: noreply@farmrentcom.in
+      - key: MSG91_FROM_NAME
+        value: FarmRent
+      - key: MSG91_RESET_TEMPLATE_ID
+        value: farmrent_password_reset
+
+  - type: keyvalue
+    name: farmrent-redis
+    plan: free
+    region: singapore
+    # It holds the email queue: a store that evicts keys under memory pressure would silently drop queued mail.
+    maxmemoryPolicy: noeviction
+    # Reachable only from services inside this Render account.
+    ipAllowList: []
