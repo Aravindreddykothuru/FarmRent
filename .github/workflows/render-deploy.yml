@@ -46,10 +46,20 @@ jobs:
             -d "$(jq -n --arg c "$GITHUB_SHA" '{clearCache:"do_not_clear", commitId:$c}')" \
             "https://api.render.com/v1/services/$SERVICE_ID/deploys")
 
-          deploy_id=$(jq -r '.id // empty' <<<"$response")
+          # Asked for a particular commit, Render answers 202 with an empty body rather than the 201-and-a-deploy
+          # it returns for an unpinned request, so the deploy has to be found afterwards by the commit it is for.
+          deploy_id=$(jq -r '.id // empty' <<<"${response:-}" 2>/dev/null || true)
+
+          for _ in $(seq 1 30); do
+            [ -n "$deploy_id" ] && break
+            sleep 2
+            deploy_id=$(curl -sS -H "Authorization: Bearer $RENDER_API_KEY" \
+              "https://api.render.com/v1/services/$SERVICE_ID/deploys?limit=20" \
+              | jq -r --arg c "$GITHUB_SHA" '[.[] | (.deploy // .) | select(.commit.id == $c)] | sort_by(.createdAt) | last | .id // empty')
+          done
+
           if [ -z "$deploy_id" ]; then
-            echo "Render did not return a deploy id:" >&2
-            echo "$response" >&2
+            echo "::error::Render accepted the request but no deploy for ${GITHUB_SHA:0:7} appeared within 60s."
             exit 1
           fi
           echo "deploy_id=$deploy_id" >> "$GITHUB_OUTPUT"

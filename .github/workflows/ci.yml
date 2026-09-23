@@ -2,8 +2,11 @@ name: CI
 
 on:
   # Every branch, not just the long-lived ones: a change is only known to build once CI has actually run it.
+  #
+  # Except the branch that deploys. Render Deploy calls this workflow as its gate, so a push there would
+  # otherwise run the whole suite twice over — once as the gate, once beside it — for the same commit.
   push:
-    branches: ['**']
+    branches-ignore: ['audit/farmrent-refactor']
   pull_request:
   workflow_call:
 
