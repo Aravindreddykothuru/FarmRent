@@ -1,3 +1,4 @@
+const fs = require('fs');
 const { z } = require('zod');
 const logger = require('./logger');
 
@@ -29,11 +30,18 @@ try {
     env = envSchema.parse(envVars);
 } catch (error) {
     if (error instanceof z.ZodError) {
-        logger.error('❌ Environment configuration validation failed:', {
-            details: (error.issues || []).map((e) => ({ field: e.path.join('.'), message: e.message })),
-        });
+        const details = (error.issues || []).map((e) => ({ field: e.path.join('.'), message: e.message }));
+        logger.error('❌ Environment configuration validation failed:', { details });
         // Exit process in production on validation failure to prevent degraded runtime states
         if (process.env.NODE_ENV === 'production') {
+            // Straight to stderr, synchronously, before the exit that would otherwise throw this away. A
+            // container that refuses to start has one job on its way out: name the setting that is wrong.
+            // Without this the whole failure reaches the deploy log as an unrelated crash inside the logger,
+            // and the deploy is debugged by guesswork.
+            //
+            // Field names and validation messages only — never the values, which are the secrets themselves.
+            const report = details.map((d) => `  - ${d.field}: ${d.message}`).join('\n');
+            fs.writeSync(2, `\nFarmRent cannot start: the environment is not configured correctly.\n${report}\n\n`);
             process.exit(1);
         }
     } else {

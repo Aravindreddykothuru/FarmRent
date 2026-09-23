@@ -1,14 +1,7 @@
 const pino = require('pino');
-const path = require('path');
-const fs = require('fs');
 const { AsyncLocalStorage } = require('async_hooks');
 
 const isProd = process.env.NODE_ENV === 'production';
-const logsDir = path.join(__dirname, '../logs');
-
-if (isProd && !fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir, { recursive: true });
-}
 
 // Thread-local context for request correlation
 const asyncLocalStorage = new AsyncLocalStorage();
@@ -35,6 +28,12 @@ const redactPaths = [
 let loggerInstance;
 
 if (isProd) {
+    // Standard output, not a file. A log file inside a container is collected by nobody and thrown away with
+    // the container, which leaves a production incident with no record of itself; the platform running the
+    // process is what gathers, keeps and searches logs, and it reads them from stdout.
+    //
+    // The writes are synchronous. Buffered writes are faster, but process.exit discards whatever has not been
+    // flushed — so the one line that explains why a process is about to die is exactly the line that gets lost.
     loggerInstance = pino(
         {
             level: 'info',
@@ -43,7 +42,7 @@ if (isProd) {
                 censor: '[REDACTED]',
             },
         },
-        pino.destination(path.join(logsDir, 'app.log')),
+        pino.destination({ dest: 1, sync: true }),
     );
 } else {
     loggerInstance = pino({
