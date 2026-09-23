@@ -1,0 +1,100 @@
+name: Render Deploy
+
+# Render's own auto-deploy is turned off for this service, and this workflow is the only thing that ships it.
+#
+# Two reasons. Render deploys a push the moment it arrives, so a commit that fails the tests reaches production
+# and is found there; here the deploy is a job that needs CI, and a red suite simply never gets to it. And
+# Render's GitHub connection is a browser authorisation that silently stops delivering — which is exactly what
+# happened to this service, whose autoDeploy read "yes" while no push ever produced a deploy. A workflow that
+# calls the API leaves a run in the Actions tab whether it worked or not.
+on:
+  push:
+    branches: [audit/farmrent-refactor]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deploys are queued rather than cancelled: cutting one off mid-update leaves the service on a half-applied
+# release, and the next push would have no way of knowing what is actually running.
+concurrency:
+  group: render-deploy
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy to Render
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+    steps:
+      - name: Trigger the deploy
+        id: trigger
+        run: |
+          set -euo pipefail
+          # Pinned to the commit CI just proved, not to whatever the branch tip happens to be by now.
+          response=$(curl -sS --fail-with-body -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg c "$GITHUB_SHA" '{clearCache:"do_not_clear", commitId:$c}')" \
+            "https://api.render.com/v1/services/$SERVICE_ID/deploys")
+
+          deploy_id=$(jq -r '.id // empty' <<<"$response")
+          if [ -z "$deploy_id" ]; then
+            echo "Render did not return a deploy id:" >&2
+            echo "$response" >&2
+            exit 1
+          fi
+          echo "deploy_id=$deploy_id" >> "$GITHUB_OUTPUT"
+          echo "Deploying ${GITHUB_SHA:0:7} as $deploy_id"
+
+      - name: Wait for it to go live
+        env:
+          DEPLOY_ID: ${{ steps.trigger.outputs.deploy_id }}
+        run: |
+          set -euo pipefail
+          deadline=$(( SECONDS + 1800 ))
+          last=""
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            status=$(curl -sS -H "Authorization: Bearer $RENDER_API_KEY" \
+              "https://api.render.com/v1/services/$SERVICE_ID/deploys/$DEPLOY_ID" | jq -r '.status // "unknown"')
+
+            if [ "$status" != "$last" ]; then
+              echo "$(date -u +%H:%M:%S)  $status"
+              last="$status"
+            fi
+
+            case "$status" in
+              live)
+                echo "Live."
+                exit 0
+                ;;
+              build_failed|update_failed|pre_deploy_failed|canceled|deactivated)
+                echo "::error::Render ended the deploy as '$status'. The build log is in the Render dashboard."
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+
+          echo "::error::Still '$last' after 30 minutes; giving up rather than reporting a deploy that never landed."
+          exit 1
+
+      - name: Confirm the running service answers
+        env:
+          SERVICE_URL: ${{ vars.RENDER_SERVICE_URL }}
+        run: |
+          set -euo pipefail
+          # "live" means Render started the container. It does not mean the application is serving, so the
+          # release is not called good until the process says so itself.
+          body=$(curl -sS --fail-with-body --retry 10 --retry-delay 5 --retry-all-errors --max-time 45 \
+            "${SERVICE_URL}/health")
+          echo "$body"
+          jq -e '.status == "ok"' <<<"$body" > /dev/null
