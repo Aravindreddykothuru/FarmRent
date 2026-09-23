@@ -47,8 +47,12 @@ services:
       - key: DATABASE_URL
         sync: false
 
-      # The public address: used for links in emails, and as the list of sites allowed to call the API. The
-      # onrender.com address is included so the site works before the domain is connected.
+      # The public address: used for links in emails, and as the list of sites allowed to call the API.
+      #
+      # Render assigns the service its own onrender.com address at creation, with a suffix that cannot be known
+      # in advance (farmrent-l9gk.onrender.com, say). Until the custom domain resolves, all four of these want
+      # that assigned address instead — a reset link pointing at a domain that does not answer is a reset
+      # nobody can complete — and it belongs in ALLOWED_ORIGINS for as long as the site is reached that way.
       - key: APP_URL
         value: https://farmrentcom.in
       - key: CLIENT_URL
@@ -56,7 +60,7 @@ services:
       - key: NEXT_PUBLIC_APP_URL
         value: https://farmrentcom.in
       - key: ALLOWED_ORIGINS
-        value: https://farmrentcom.in,https://www.farmrentcom.in,https://farmrent.onrender.com
+        value: https://farmrentcom.in,https://www.farmrentcom.in
 
       # Email: MSG91 first, Gmail SMTP when MSG91 refuses or fails.
       - key: EMAIL_PROVIDERS
