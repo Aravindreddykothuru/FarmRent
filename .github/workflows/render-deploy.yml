@@ -38,13 +38,32 @@ jobs:
       - name: Trigger the deploy
         id: trigger
         run: |
-          set -euo pipefail
+          set -uo pipefail
           # Pinned to the commit CI just proved, not to whatever the branch tip happens to be by now.
-          response=$(curl -sS --fail-with-body -X POST \
+          code=$(curl -sS -o response.json -w '%{http_code}' -X POST \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg c "$GITHUB_SHA" '{clearCache:"do_not_clear", commitId:$c}')" \
             "https://api.render.com/v1/services/$SERVICE_ID/deploys")
+
+          case "$code" in
+            200|201|202) ;;
+            401|403)
+              # Secrets are read when the run is queued, not when this job starts, so a key rotated while the
+              # suite was running leaves the job holding the previous one. That is worth saying outright: the
+              # request is indistinguishable from a key that was never valid.
+              echo "::error::Render rejected the API key (HTTP $code). If it was rotated while this run was in \
+          progress, the run is still holding the previous key - update RENDER_API_KEY and start a new run."
+              cat response.json >&2 || true
+              exit 1
+              ;;
+            *)
+              echo "::error::Render refused the deploy request (HTTP $code)."
+              cat response.json >&2 || true
+              exit 1
+              ;;
+          esac
+          response=$(cat response.json)
 
           # Asked for a particular commit, Render answers 202 with an empty body rather than the 201-and-a-deploy
           # it returns for an unpinned request, so the deploy has to be found afterwards by the commit it is for.
