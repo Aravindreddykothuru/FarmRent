@@ -13,6 +13,13 @@ const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
 const endpoint = process.env.AWS_S3_ENDPOINT; // For S3-compatible services like Supabase
 
+// Where a browser fetches an uploaded file from, which is not always where the SDK writes it. Supabase accepts
+// uploads at /storage/v1/s3 and serves them from /storage/v1/object/public/<bucket>; deriving the second from
+// the first yields a URL that 404s for every visitor while the upload itself reports success — a listing whose
+// photo is permanently broken, with nothing in the logs to say so. Stated outright rather than guessed at,
+// because the rule differs per provider and getting it wrong is invisible from the server's side.
+const publicBaseUrl = String(process.env.AWS_S3_PUBLIC_URL || '').replace(/\/+$/, '');
+
 if (accessKeyId && secretAccessKey) {
     const s3Config = {
         region: s3Region,
@@ -26,7 +33,12 @@ if (accessKeyId && secretAccessKey) {
         s3Config.forcePathStyle = true; // Required for Supabase/MinIO
     }
     s3Client = new S3Client(s3Config);
-    logger.info('[S3] Client successfully initialized');
+    logger.info('[S3] Client successfully initialized', { bucket: bucketName, endpoint: endpoint || 'aws', publicBaseUrl: publicBaseUrl || '(derived)' });
+} else if (process.env.NODE_ENV === 'production') {
+    // Loud in production. Without storage, every upload below hands back an address on a domain that does not
+    // exist, the caller stores it as though it were a photo, and the listing shows a broken image from then on.
+    // This ran in production unnoticed precisely because the fallback announced itself at debug level.
+    logger.error('[S3] No credentials — every upload will return a placeholder URL and photos will not display. Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_ENDPOINT and AWS_S3_PUBLIC_URL.');
 } else {
     logger.warn('[S3] Missing credentials. S3 client not initialized. Falling back to mock uploads.');
 }
@@ -36,7 +48,8 @@ if (accessKeyId && secretAccessKey) {
  */
 async function uploadToS3(key, buffer, contentType) {
     if (!s3Client) {
-        logger.debug('[S3] Mock upload triggered for key:', key);
+        // A warning, not a debug line: the caller is about to store this placeholder as though it were a photo.
+        logger.warn('[S3] No storage configured — returning a placeholder URL that will not load', { key });
         return `https://mock-s3-storage.local/${bucketName}/${key}`;
     }
 
@@ -49,8 +62,9 @@ async function uploadToS3(key, buffer, contentType) {
 
     await s3Client.send(command);
 
-    // In standard AWS, the public URL layout matches this.
-    // For S3-compat (like Supabase), we map to the public endpoint.
+    if (publicBaseUrl) return `${publicBaseUrl}/${key}`;
+    // Without one configured, the layouts the two supported cases happen to use. The S3-compatible branch holds
+    // only where a provider serves files from the same address it accepts them at, which Supabase does not.
     if (endpoint) {
         return `${endpoint}/${bucketName}/${key}`;
     }
