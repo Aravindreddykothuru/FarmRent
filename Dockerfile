@@ -6,13 +6,19 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# The npm cache is mounted rather than baked in: it survives between builds (so a rebuild does not re-download
-# the world) and never becomes part of a layer.
+# Manifests are copied before the sources so these layers are reused whenever dependencies have not changed,
+# which is the cache that actually matters: npm only re-runs when a lockfile does.
+#
+# There is deliberately no BuildKit cache mount here. It saved a download on the rarer path — a build where a
+# lockfile did change — but every builder wants a different id for it. Render accepted no id at all, Railway
+# demands "s/<service-id>-<name>" and forbids interpolating a variable into it, which means hard-coding one
+# platform's service UUID into the image. That UUID stops being true the moment the service is recreated, and
+# this file would then only build on the machine it was written for.
 COPY Backend_Node_legacy/package.json Backend_Node_legacy/package-lock.json Backend_Node_legacy/.npmrc ./Backend_Node_legacy/
-RUN --mount=type=cache,target=/root/.npm cd Backend_Node_legacy && npm ci --omit=dev --legacy-peer-deps
+RUN cd Backend_Node_legacy && npm ci --omit=dev --legacy-peer-deps
 
 COPY nextfrontend/package.json nextfrontend/package-lock.json ./nextfrontend/
-RUN --mount=type=cache,target=/root/.npm cd nextfrontend && npm ci --legacy-peer-deps
+RUN cd nextfrontend && npm ci --legacy-peer-deps
 
 COPY Backend_Node_legacy ./Backend_Node_legacy
 COPY nextfrontend ./nextfrontend

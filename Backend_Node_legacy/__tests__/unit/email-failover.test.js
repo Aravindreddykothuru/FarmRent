@@ -138,6 +138,17 @@ describe('provider failover', () => {
         expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
+    test('SMTP connects over IPv4, so a host without an IPv6 route can still send', async () => {
+        const nodemailer = require('nodemailer');
+        nodemailer.createTransport.mockClear();
+
+        await expect(emailService.sendNow(templated({ template: undefined }))).resolves.toBe(true);
+
+        // Without this the relay is reached at its IPv6 address and the connection fails with ENETUNREACH on
+        // any host given no outbound IPv6 — which looks like the relay being down, not the network refusing.
+        expect(nodemailer.createTransport).toHaveBeenCalledWith(expect.objectContaining({ family: 4 }));
+    });
+
     test('MSG91 requests go over IPv4, so an IPv4 whitelist is what MSG91 checks', async () => {
         process.env.EMAIL_PROVIDERS = 'msg91,smtp';
 

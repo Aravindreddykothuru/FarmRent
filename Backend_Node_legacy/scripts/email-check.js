@@ -24,7 +24,9 @@ const nodemailer = require('nodemailer');
 const args = process.argv.slice(2);
 const sendTo = args.includes('--send') ? args[args.indexOf('--send') + 1] : null;
 
-const TIMEOUTS = { connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 20_000 };
+// Matches the application's own transport, IPv4 pin included: a check that connects differently from the code
+// it is checking can report a relay as reachable on a host where the application cannot reach it at all.
+const TIMEOUTS = { connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 20_000, family: 4 };
 const filled = (...keys) => keys.every((k) => String(process.env[k] || '').trim().length > 0);
 const mask = (value) => (value ? `${String(value).slice(0, 2)}***` : '(empty)');
 

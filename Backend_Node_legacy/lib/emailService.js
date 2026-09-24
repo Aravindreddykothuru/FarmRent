@@ -183,6 +183,14 @@ async function sendViaResend({ to, subject, html, attachments }) {
 // the queue's drain flag set — after which every later email sat in an array nobody drained, while callers
 // were told the message had been accepted.
 const SMTP_TIMEOUTS = { connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 20_000 };
+
+// Every SMTP transport is built from this. The IPv4 pin is the same lesson MSG91 taught, arriving by a
+// different route: Node resolves a relay to its IPv6 address first, and a host with no IPv6 route out answers
+// with ENETUNREACH before a packet leaves. Gmail's relay is dual-stack, so on such a host — one cloud provider
+// gives its containers no outbound IPv6 at all — every message failed at connect with
+// "ENETUNREACH 2607:f8b0:...:587", which reads as the relay being down rather than as the network refusing.
+// Every relay this code talks to is reachable over IPv4, so preferring it costs nothing and removes the class.
+const SMTP_TRANSPORT = { ...SMTP_TIMEOUTS, family: 4 };
 // Overridable so tests can drive the backstop in milliseconds instead of waiting out the real bound.
 const MEMORY_SEND_TIMEOUT_MS = Number(process.env.EMAIL_SEND_TIMEOUT_MS) || 30_000;
 // How long any one provider gets before the chain moves on. Above socketTimeout, so a provider's own error is
@@ -219,7 +227,7 @@ async function sendViaBrevo({ to, subject, html, attachments }) {
             port: 587,
             secure: false,
             auth: { user: BREVO_SMTP_USER, pass: BREVO_SMTP_PASS },
-            ...SMTP_TIMEOUTS,
+            ...SMTP_TRANSPORT,
         });
         await transporter.sendMail({ from: senderEmail, to, subject, html, attachments });
         logger.info('[email/brevo] Sent', { to, subject });
@@ -241,7 +249,7 @@ function buildSmtpTransport() {
         port: creds.port,
         secure: creds.port === 465,
         auth: { user: creds.user, pass: creds.pass },
-        ...SMTP_TIMEOUTS,
+        ...SMTP_TRANSPORT,
     });
 }
 
@@ -361,7 +369,7 @@ async function sendViaEthereal({ to, subject, html, attachments }) {
             port: 587,
             secure: false,
             auth: { user: account.user, pass: account.pass },
-            ...SMTP_TIMEOUTS,
+            ...SMTP_TRANSPORT,
         });
 
         const info = await transporter.sendMail({
