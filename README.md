@@ -1,5 +1,15 @@
 # FarmRent — Farm Equipment Rental Platform
 
+[![Render Deploy](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/render-deploy.yml/badge.svg?branch=audit/farmrent-refactor)](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/render-deploy.yml)
+[![CI](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/ci.yml/badge.svg)](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/ci.yml)
+
+> ### Live site — **<https://farmrentcom.in>**
+>
+> **Deploys from** [`.github/workflows/render-deploy.yml`](.github/workflows/render-deploy.yml) — every push to `audit/farmrent-refactor`
+> runs the whole test suite first and reaches Render only if it passes.
+> **Watch a release:** [Actions → Render Deploy](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/render-deploy.yml)
+> · **Repository:** [Aravindreddykothuru/FarmRent](https://github.com/Aravindreddykothuru/FarmRent)
+
 FarmRent connects farmers who need machinery (tractors, harvesters, sprayers, threshers) with owners who rent it out. Owners list equipment with a daily rate, deposit and pickup point; renters request dates; owners confirm, hand over and close the rental with a code the renter shows them. Payments are cash on delivery or Razorpay.
 
 ---
@@ -42,19 +52,39 @@ Browser (Next.js pages, Socket.IO client)
 
 Requests, confirmed and active rentals block their dates; an overlapping request is refused with `409 BOOKING_CONFLICT`.
 
+### On a phone
+
+Most people who sign up arrive on an Android phone, often on a slow connection and often not reading
+English, so the sign-in and registration screens are built for that reader first:
+
+- Controls are at least 48px tall and body text at least 16px, so nothing needs zooming to read or a
+  second try to tap. Checked in a real browser at 360px and 412px, with no horizontal scrolling.
+- English, Telugu and Hindi sit at the top of both screens, one tap each; the other seven languages are
+  behind **More languages** (`/select-language`). Someone who cannot read the page has to be able to
+  change it before anything else on the page helps them.
+- A **Need help? Call us** button dials the support number straight from the screen.
+- Field errors appear underneath as an icon and plain words rather than fine red print.
+- Registration shows which of its three phases you are in — your email, your details, done.
+
+The app is installable: Android Chrome offers **Add to Home Screen** and then opens it without browser
+chrome. The manifest is `nextfrontend/public/manifest.webmanifest`. Pinch-zoom is deliberately left
+enabled, because capping it locks out anyone who needs to magnify.
+
 ---
 
 ## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Web app | Next.js 16 (App Router), React 19, Tailwind CSS, shadcn/ui |
+| Web app | Next.js 16 (App Router), React 19, Tailwind CSS, shadcn/ui; installable as a PWA |
 | API | Node.js 20, Express 4, Zod validation, Socket.IO 4 |
 | Database | PostgreSQL 15 + PostGIS via PostgREST (Supabase-compatible); SQL migrations in `Backend_Node_legacy/db/migrations` |
 | Cache / sessions | Redis 7 |
 | Payments | Razorpay (optional) + cash on delivery |
+| Languages | 10 — English, Hindi, Telugu, Tamil, Kannada, Marathi, Punjabi, Bengali, Gujarati, Malayalam (`nextfrontend/messages/`) |
+| Hosting | Render web service from `Dockerfile` (blueprint in `render.yaml`), Render Key Value for Redis, Supabase for Postgres |
 | Tests | Jest + Supertest (unit, integration, API contract), HTTP acceptance script, Playwright-driven browser smoke |
-| CI | GitHub Actions (`.github/workflows/ci.yml`) |
+| CI / CD | GitHub Actions — `ci.yml` (tests), `render-deploy.yml` (live site), `production-deploy.yml` (ECR/EKS image) |
 
 ---
 
@@ -77,6 +107,11 @@ nextfrontend/               Next.js app and the unified server
   server.js                 entry point (dev and production)
   proxy.ts                  sign-in redirects for protected pages
   scripts/ui-smoke.mjs      browser smoke test
+  components/AuthAssist.tsx language chips and the "Need help?" button shared by the auth screens
+  lib/contact.ts            support phone, email and location — the one place they are written down
+  messages/                 UI strings, one file per language; i18n/config.ts lists the locales
+  public/manifest.webmanifest, public/icons/   PWA manifest and icons (Add to Home Screen)
+render.yaml                 Render blueprint: the web service and Redis that run the live site
 ```
 
 Nothing else in the repository is part of the product: earlier prototypes (a Flask sidecar, a Spring Boot service, a separate Next.js app, a MongoDB backend) were never deployed and have been removed; they remain in git history.
@@ -152,10 +187,22 @@ docker compose --profile app up --build
 
 ### Deploying
 
+The live site runs on **Render** at **<https://farmrentcom.in>**.
+
+- **[`.github/workflows/render-deploy.yml`](.github/workflows/render-deploy.yml) is what ships it.** A push to
+  `audit/farmrent-refactor` runs the whole suite as a gate and calls the Render API only once it is green,
+  pinned to the commit CI just proved rather than to whatever the branch tip has become. A red suite never
+  reaches production, and every attempt leaves a run in
+  [Actions](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/render-deploy.yml) whether it
+  succeeded or not — which a browser-authorised Render connection does not. `workflow_dispatch` re-runs it
+  by hand.
+- **[`render.yaml`](render.yaml)** is the blueprint: one Docker web service and a Key Value (Redis) instance,
+  with Postgres coming from a Supabase project created outside Render. Values marked `sync: false` are entered
+  in the Render dashboard and never live in this repository.
 - Build the image from `Dockerfile`. Browser-visible settings (`NEXT_PUBLIC_*`) are build arguments; server secrets are runtime environment variables and never enter the image (`.dockerignore` excludes every `.env` file).
 - Required runtime variables: `JWT_SECRET`, `JWT_REFRESH_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `REDIS_URL`, `APP_URL`, `ALLOWED_ORIGINS` (your real domains only), `CLIENT_URL`. Set `TRUST_PROXY=1` behind a load balancer so rate limits see client IPs.
 - Apply database migrations deliberately before releasing code that needs them — back up first, then from `Backend_Node_legacy`: `DATABASE_URL=<production connection string> npm run migrate`. The runner records checksums in `schema_migrations`, takes an advisory lock and skips migrations that are already applied. The deploy workflow never migrates on its own.
-- `.github/workflows/production-deploy.yml` runs the full CI, builds and pushes the image to ECR and rolls out to EKS.
+- `.github/workflows/production-deploy.yml` is a separate path, triggered by a push to `main`: it runs the full CI, builds and pushes the image to ECR and rolls out to EKS. It does not serve farmrentcom.in.
 
 ---
 
