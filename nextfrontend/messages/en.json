@@ -96,7 +96,10 @@
     "feature2": "Live GPS tracking on every booking",
     "feature3": "Secure Razorpay-powered payments",
     "feature4": "Trusted by 2,000+ farmers across India",
-    "indiaTopMarket": "India's #1 Agri-Equipment Marketplace"
+    "indiaTopMarket": "India's #1 Agri-Equipment Marketplace",
+    "chooseLanguage": "Choose your language",
+    "moreLanguages": "More languages",
+    "needHelp": "Need help? Call us"
   },
   "home": {
     "heroTitle": "Rent Farm Equipment Near You",
@@ -871,6 +874,10 @@
     "registrationFailed": "Registration failed",
     "failedSendOTP": "Failed to send OTP",
     "invalidOTP": "Invalid OTP. Please try again.",
-    "otpSentToast": "OTP sent to +91 ****{last4}"
+    "otpSentToast": "OTP sent to +91 ****{last4}",
+    "stepOf": "Step {current} of {total}",
+    "stepVerify": "Your email",
+    "stepDetails": "Your details",
+    "stepDone": "Done"
   }
 }

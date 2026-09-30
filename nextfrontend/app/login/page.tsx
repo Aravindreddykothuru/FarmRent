@@ -10,10 +10,11 @@ import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tractor, Loader2, Eye, EyeOff, Shield, Zap, Star, Globe } from 'lucide-react';
+import { Tractor, Loader2, Eye, EyeOff, Shield, Zap, Star, Mail, Lock, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { LanguageQuickBar, NeedHelpButton } from '@/components/AuthAssist';
 const loginSchema = z.object({
     email:    z.string().email({ message: 'Enter a valid email address' }),
     password: z.string().min(1, { message: 'Password is required' }),
@@ -28,7 +29,7 @@ function LoginForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { login } = useAuth();
-    const { t, currentLanguage } = useLanguage();
+    const { t } = useLanguage();
     const [showPass, setShowPass] = useState(false);
 
     const FEATURES = [
@@ -57,7 +58,7 @@ function LoginForm() {
     };
 
     return (
-        <div className="min-h-screen flex">
+        <div className="min-h-screen flex overflow-x-hidden">
 
             {/* ── Left panel (hidden on mobile) ─────────────────────── */}
             <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-green-950 via-green-900 to-green-800 flex-col justify-between p-12 relative overflow-hidden">
@@ -102,82 +103,99 @@ function LoginForm() {
             </div>
 
             {/* ── Right panel (form) ─────────────────────────────────── */}
-            <div className="flex-1 flex items-center justify-center px-5 py-10 bg-white">
+            <div className="flex-1 flex items-center justify-center px-4 py-8 sm:px-5 sm:py-10 bg-white">
                 <div className="w-full max-w-md">
 
-                    {/* Mobile logo */}
-                    <div className="flex justify-center mb-8 lg:hidden">
-                        <Link href="/" className="flex items-center gap-2">
+                    {/* Mobile logo + tagline */}
+                    <div className="mb-6 lg:hidden">
+                        <Link href="/" className="flex items-center justify-center gap-2">
                             <div className="bg-green-700 rounded-xl p-2.5">
-                                <Tractor className="h-6 w-6 text-white" />
+                                <Tractor className="h-7 w-7 text-white" />
                             </div>
-                            <span className="text-2xl font-black text-green-700">FarmRent</span>
+                            <span className="text-3xl font-black text-green-700">FarmRent</span>
                         </Link>
+                        <p className="mt-2 text-center text-base text-gray-700">{t('auth.signInSubtitle')}</p>
                     </div>
 
-                    {/* Language selector */}
-                    <div className="flex justify-end mb-4">
-                        <Link href={`/select-language?next=/login`}
-                            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-green-700 transition-colors font-medium bg-gray-50 hover:bg-green-50 rounded-lg px-3 py-1.5 border border-gray-200 hover:border-green-300">
-                            <Globe className="h-3.5 w-3.5" />
-                            <span>{currentLanguage.name}</span>
-                        </Link>
-                    </div>
+                    {/* Language — kept near the top, since a farmer who cannot read this page
+                        needs to switch before anything else on it makes sense. */}
+                    <LanguageQuickBar next="/login" />
 
-                    <div className="mb-8">
+                    <div className="mb-6">
                         <h1 className="text-3xl font-black text-gray-900">{t('auth.welcomeBack')}</h1>
-                        <p className="text-gray-500 mt-1">{t('auth.signInSubtitle')}</p>
+                        <p className="hidden lg:block text-gray-600 mt-1 text-base">{t('auth.signInSubtitle')}</p>
                     </div>
 
                     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                         <div>
-                            <Label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-gray-700">
+                            <Label htmlFor="email" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-gray-800">
+                                <Mail className="h-5 w-5 text-green-700" aria-hidden="true" />
                                 {t('auth.email')}
                             </Label>
                             <Input
                                 id="email"
                                 type="email"
+                                inputMode="email"
+                                autoComplete="email"
                                 placeholder="you@example.com"
+                                aria-invalid={!!errors.email}
                                 {...register('email')}
-                                className={`h-11 rounded-xl ${errors.email ? 'border-red-400 focus-visible:ring-red-400' : 'border-gray-200'}`}
+                                className={`h-12 rounded-xl text-base ${errors.email ? 'border-red-500 focus-visible:ring-red-500' : 'border-gray-300'}`}
                             />
-                            {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
+                            {errors.email && (
+                                <p className="text-red-600 text-sm mt-1.5 flex items-center gap-1.5">
+                                    <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                                    {errors.email.message}
+                                </p>
+                            )}
                         </div>
 
                         <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                                <Label htmlFor="password" className="text-sm font-semibold text-gray-700">{t('auth.password')}</Label>
-                                <Link href="/forgot-password" className="text-xs text-green-700 hover:underline font-medium">
-                                    {t('auth.forgotPassword')}
-                                </Link>
-                            </div>
+                            <Label htmlFor="password" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-gray-800">
+                                <Lock className="h-5 w-5 text-green-700" aria-hidden="true" />
+                                {t('auth.password')}
+                            </Label>
                             <div className="relative">
                                 <Input
                                     id="password"
                                     type={showPass ? 'text' : 'password'}
+                                    autoComplete="current-password"
                                     placeholder="Your password"
+                                    aria-invalid={!!errors.password}
                                     {...register('password')}
-                                    className={`h-11 rounded-xl pr-11 ${errors.password ? 'border-red-400 focus-visible:ring-red-400' : 'border-gray-200'}`}
+                                    className={`h-12 rounded-xl text-base pr-14 ${errors.password ? 'border-red-500 focus-visible:ring-red-500' : 'border-gray-300'}`}
                                 />
                                 <button
                                     type="button"
+                                    suppressHydrationWarning
                                     aria-label={showPass ? 'Hide password' : 'Show password'}
                                     onClick={() => setShowPass(v => !v)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                                    className="absolute right-0 top-0 h-12 w-12 flex items-center justify-center text-gray-500 hover:text-gray-800 transition-colors"
                                 >
-                                    {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                    {showPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                 </button>
                             </div>
-                            {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password.message}</p>}
+                            {errors.password && (
+                                <p className="text-red-600 text-sm mt-1.5 flex items-center gap-1.5">
+                                    <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                                    {errors.password.message}
+                                </p>
+                            )}
+                            <Link
+                                href="/forgot-password"
+                                className="mt-2 inline-flex h-11 items-center text-base font-semibold text-green-800 hover:underline"
+                            >
+                                {t('auth.forgotPassword')}
+                            </Link>
                         </div>
 
                         <Button
                             type="submit"
-                            className="w-full h-11 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-base mt-1"
+                            className="w-full h-14 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-lg"
                             disabled={isSubmitting}
                         >
                             {isSubmitting
-                                ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />{t('auth.signingIn')}</>
+                                ? <><Loader2 className="h-5 w-5 animate-spin mr-2" />{t('auth.signingIn')}</>
                                 : t('auth.signIn')}
                         </Button>
                     </form>
@@ -188,27 +206,33 @@ function LoginForm() {
                             <div className="w-full border-t border-gray-100" />
                         </div>
                         <div className="relative flex justify-center">
-                            <span className="bg-white px-3 text-xs text-gray-400 font-medium">{t('auth.noAccount')}</span>
+                            <span className="bg-white px-3 text-base text-gray-600 font-semibold">{t('auth.noAccount')}</span>
                         </div>
                     </div>
 
-                    {/* Register links */}
-                    <div className="grid grid-cols-2 gap-3">
-                        <Link href="/register?role=farmer">
-                            <button type="button" suppressHydrationWarning className="w-full border-2 border-gray-100 hover:border-green-300 hover:bg-green-50 rounded-xl px-3 py-3 text-center transition-all group">
-                                <div className="text-xl mb-1">👨‍🌾</div>
-                                <p className="text-xs font-bold text-gray-700 group-hover:text-green-700">{t('auth.rentEquipment')}</p>
-                                <p className="text-[10px] text-gray-400">{t('auth.registerFarmer')}</p>
-                            </button>
+                    {/* Register links — one column on a phone, so each card stays thumb-sized */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <Link href="/register?role=farmer" className="block">
+                            <span className="flex min-h-[64px] w-full items-center gap-3 border-2 border-gray-300 hover:border-green-500 hover:bg-green-50 rounded-xl px-4 py-3 transition-all group">
+                                <span className="text-3xl" aria-hidden="true">👨‍🌾</span>
+                                <span className="text-left">
+                                    <span className="block text-base font-bold text-gray-800 group-hover:text-green-800">{t('auth.rentEquipment')}</span>
+                                    <span className="block text-base text-gray-600">{t('auth.registerFarmer')}</span>
+                                </span>
+                            </span>
                         </Link>
-                        <Link href="/register?role=owner">
-                            <button type="button" suppressHydrationWarning className="w-full border-2 border-gray-100 hover:border-green-300 hover:bg-green-50 rounded-xl px-3 py-3 text-center transition-all group">
-                                <div className="text-xl mb-1">🚜</div>
-                                <p className="text-xs font-bold text-gray-700 group-hover:text-green-700">{t('auth.listEquipment')}</p>
-                                <p className="text-[10px] text-gray-400">{t('auth.registerOwner')}</p>
-                            </button>
+                        <Link href="/register?role=owner" className="block">
+                            <span className="flex min-h-[64px] w-full items-center gap-3 border-2 border-gray-300 hover:border-green-500 hover:bg-green-50 rounded-xl px-4 py-3 transition-all group">
+                                <span className="text-3xl" aria-hidden="true">🚜</span>
+                                <span className="text-left">
+                                    <span className="block text-base font-bold text-gray-800 group-hover:text-green-800">{t('auth.listEquipment')}</span>
+                                    <span className="block text-base text-gray-600">{t('auth.registerOwner')}</span>
+                                </span>
+                            </span>
                         </Link>
                     </div>
+
+                    <NeedHelpButton />
                 </div>
             </div>
         </div>

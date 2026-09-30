@@ -71,7 +71,10 @@
     "state": "राज्य",
     "loginSuccess": "आपका स्वागत है!",
     "registerSuccess": "खाता बन गया!",
-    "logoutSuccess": "लॉग आउट हो गए"
+    "logoutSuccess": "लॉग आउट हो गए",
+    "chooseLanguage": "अपनी भाषा चुनें",
+    "moreLanguages": "और भाषाएँ",
+    "needHelp": "मदद चाहिए? कॉल करें"
   },
   "home": {
     "heroTitle": "पास के खेत उपकरण किराए पर लें",
@@ -383,5 +386,11 @@
     "analytics": "विश्लेषण",
     "loadDashboardError": "डैशबोर्ड लोड नहीं किया जा सका",
     "perDaySuffix": "/दिन"
+  },
+  "register": {
+    "stepOf": "चरण {current} / {total}",
+    "stepVerify": "आपका ईमेल",
+    "stepDetails": "आपकी जानकारी",
+    "stepDone": "पूरा हुआ"
   }
 }

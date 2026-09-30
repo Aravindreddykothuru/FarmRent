@@ -68,7 +68,10 @@
     "state": "రాష్ట్రం",
     "loginSuccess": "స్వాగతం!",
     "registerSuccess": "ఖాతా తెరవబడింది!",
-    "logoutSuccess": "లాగ్ అవుట్ అయింది"
+    "logoutSuccess": "లాగ్ అవుట్ అయింది",
+    "chooseLanguage": "మీ భాషను ఎంచుకోండి",
+    "moreLanguages": "మరిన్ని భాషలు",
+    "needHelp": "సహాయం కావాలా? కాల్ చేయండి"
   },
   "home": {
     "heroTitle": "మీ దగ్గర వ్యవసాయ పరికరాలు అద్దెకు తీసుకోండి",
@@ -383,5 +386,11 @@
     "analytics": "విశ్లేషణలు",
     "loadDashboardError": "డాష్‌బోర్డ్‌ను లోడ్ చేయలేకపోయాము",
     "perDaySuffix": "/రోజు"
+  },
+  "register": {
+    "stepOf": "దశ {current} / {total}",
+    "stepVerify": "మీ ఇమెయిల్",
+    "stepDetails": "మీ వివరాలు",
+    "stepDone": "పూర్తయింది"
   }
 }

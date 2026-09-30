@@ -88,7 +88,7 @@ export default function PincodeField({ value: valueProp, onChange, onResolved, l
 
     return (
         <div className={className}>
-            <Label htmlFor="pincode-input" className="mb-1.5 block text-xs font-semibold text-gray-600">
+            <Label htmlFor="pincode-input" className="mb-1.5 block text-base font-semibold text-gray-800">
                 {label} {required && <span className="text-red-500">*</span>}
             </Label>
             <div className="relative">
@@ -100,29 +100,29 @@ export default function PincodeField({ value: valueProp, onChange, onResolved, l
                     placeholder="6-digit PIN code"
                     value={value}
                     onChange={e => handleChange(e.target.value)}
-                    className={`h-10 rounded-xl text-sm pr-9 ${error ? 'border-red-400 focus-visible:ring-red-400' : ''}`}
+                    className={`h-12 rounded-xl text-base pr-10 ${error ? 'border-red-500 focus-visible:ring-red-500' : 'border-gray-300'}`}
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                    {status === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-                    {status === 'found'   && <CheckCircle2 className="h-4 w-4 text-green-600" />}
-                    {status === 'invalid' && <XCircle className="h-4 w-4 text-red-500" />}
+                    {status === 'loading' && <Loader2 className="h-5 w-5 animate-spin text-gray-500" />}
+                    {status === 'found'   && <CheckCircle2 className="h-5 w-5 text-green-600" />}
+                    {status === 'invalid' && <XCircle className="h-5 w-5 text-red-600" />}
                 </div>
             </div>
 
             {/* Feedback message */}
             {status === 'found' && result && (
-                <p className="text-xs text-green-700 font-medium mt-1 flex items-center gap-1">
+                <p className="text-sm text-green-800 font-medium mt-1.5 flex items-center gap-1.5">
                     <CheckCircle2 className="h-3 w-3" />
                     Location found: {result.town}, {result.state}
                 </p>
             )}
             {status === 'invalid' && (
-                <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                <p className="text-sm text-red-600 mt-1.5 flex items-center gap-1.5">
                     <XCircle className="h-3 w-3" />
                     Invalid PIN code — please check
                 </p>
             )}
-            {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+            {error && <p className="text-sm text-red-600 mt-1.5">{error}</p>}
         </div>
     );
 }

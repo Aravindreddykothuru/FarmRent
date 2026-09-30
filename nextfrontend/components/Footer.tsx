@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Tractor, MapPin, Phone, Mail, ArrowRight } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
+import { SUPPORT_PHONE_DISPLAY, SUPPORT_PHONE_E164, SUPPORT_EMAIL, SUPPORT_LOCATION } from '@/lib/contact';
 
 const STATES = ['Telangana', 'Andhra Pradesh', 'Maharashtra', 'Karnataka', 'Tamil Nadu', 'Punjab', 'Haryana', 'Uttar Pradesh'];
 
@@ -68,15 +69,15 @@ export default function Footer() {
                         <div className="space-y-2 text-sm">
                             <div className="flex items-center gap-2 text-gray-400">
                                 <MapPin className="h-4 w-4 text-green-500 flex-shrink-0" />
-                                <span>Tirupathi, Andhra Pradesh, India</span>
+                                <span>{SUPPORT_LOCATION}</span>
                             </div>
                             <div className="flex items-center gap-2 text-gray-400">
                                 <Phone className="h-4 w-4 text-green-500 flex-shrink-0" />
-                                <span>+91 76719 97693</span>
+                                <a href={`tel:${SUPPORT_PHONE_E164}`} className="hover:text-green-400">{SUPPORT_PHONE_DISPLAY}</a>
                             </div>
                             <div className="flex items-center gap-2 text-gray-400">
                                 <Mail className="h-4 w-4 text-green-500 flex-shrink-0" />
-                                <span>support@farmrent.in</span>
+                                <a href={`mailto:${SUPPORT_EMAIL}`} className="hover:text-green-400">{SUPPORT_EMAIL}</a>
                             </div>
                         </div>
                     </div>
