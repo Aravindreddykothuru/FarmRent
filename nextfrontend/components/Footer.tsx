@@ -68,11 +68,11 @@ export default function Footer() {
                         <div className="space-y-2 text-sm">
                             <div className="flex items-center gap-2 text-gray-400">
                                 <MapPin className="h-4 w-4 text-green-500 flex-shrink-0" />
-                                <span>Hyderabad, Telangana, India</span>
+                                <span>Tirupathi, Andhra Pradesh, India</span>
                             </div>
                             <div className="flex items-center gap-2 text-gray-400">
                                 <Phone className="h-4 w-4 text-green-500 flex-shrink-0" />
-                                <span>+91 98765 43210</span>
+                                <span>+91 76719 97693</span>
                             </div>
                             <div className="flex items-center gap-2 text-gray-400">
                                 <Mail className="h-4 w-4 text-green-500 flex-shrink-0" />
