@@ -99,7 +99,14 @@
     "indiaTopMarket": "India's #1 Agri-Equipment Marketplace",
     "chooseLanguage": "Choose your language",
     "moreLanguages": "More languages",
-    "needHelp": "Need help? Call us"
+    "needHelp": "Need help? Call us",
+    "loginWithOtp": "OTP on SMS",
+    "enterTenDigits": "Please enter a 10-digit mobile number",
+    "resendIn": "Resend OTP in {seconds}s",
+    "verifyByPhone": "Mobile number",
+    "verifyByEmail": "Email",
+    "phoneVerifiedBadge": "Number verified",
+    "changeNumber": "Change"
   },
   "home": {
     "heroTitle": "Rent Farm Equipment Near You",

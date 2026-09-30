@@ -70,6 +70,33 @@ The app is installable: Android Chrome offers **Add to Home Screen** and then op
 chrome. The manifest is `nextfrontend/public/manifest.webmanifest`. Pinch-zoom is deliberately left
 enabled, because capping it locks out anyone who needs to magnify.
 
+### Signing in with a mobile number
+
+Both auth screens take a mobile number as well as an email. Login offers **OTP on SMS** beside the
+password, and registration lets a person prove themselves by **email or mobile**, whichever they can
+use; either route creates the same account.
+
+Codes are delivered by [2Factor.in](https://2factor.in). Its AUTOGEN flow generates, sends and checks
+the code, so the server never holds an OTP and there is nothing to leak — the audit table has no column
+that could store one, and logs carry a masked number (`98XXXXXX10`) and never the key or the code.
+
+| Variable | What it does |
+|---|---|
+| `TWOFACTOR_API_KEY` | The 2Factor account key. Server-side only, never sent to a browser. Without it the phone endpoints fall back to the existing providers, which outside production ends at a code the server logs and returns as `devOtp` — so the whole flow is testable with no paid account. |
+| `TWOFACTOR_TEMPLATE` | The DLT template name. Leave empty for 2Factor's default; set it to the registered "FarmRent" template once DLT approval arrives, with no code change. |
+
+On Render both are set in the dashboard — `render.yaml` declares the key as `sync: false`, so it is
+asked for there and never committed. Every `.env` file is already gitignored.
+
+Limits, enforced per number and per address because each send costs a message: one code a minute,
+five an hour per number, ten an hour per address, and three wrong guesses before the code is thrown
+away. A verified signup returns a token that proves only that number, is single use and expires in ten
+minutes; it is what step 3 exchanges for an account.
+
+An email address is still required at signup: `users.email` is `NOT NULL` and the JWT is signed with
+it, so a phone-only account would need a migration on the live users table and a change to token
+signing. The number is proved by OTP; the address is not, and the account does not claim it is.
+
 ---
 
 ## Tech stack
@@ -81,6 +108,7 @@ enabled, because capping it locks out anyone who needs to magnify.
 | Database | PostgreSQL 15 + PostGIS via PostgREST (Supabase-compatible); SQL migrations in `Backend_Node_legacy/db/migrations` |
 | Cache / sessions | Redis 7 |
 | Payments | Razorpay (optional) + cash on delivery |
+| SMS OTP | 2Factor.in AUTOGEN (optional); falls back to the existing email/WhatsApp/SMS providers, and to a logged code outside production |
 | Languages | 10 — English, Hindi, Telugu, Tamil, Kannada, Marathi, Punjabi, Bengali, Gujarati, Malayalam (`nextfrontend/messages/`) |
 | Hosting | Render web service from `Dockerfile` (blueprint in `render.yaml`), Render Key Value for Redis, Supabase for Postgres |
 | Tests | Jest + Supertest (unit, integration, API contract), HTTP acceptance script, Playwright-driven browser smoke |
@@ -229,6 +257,7 @@ Errors carry `error.code` (for example `VALIDATION_ERROR`, `INVALID_CREDENTIALS`
 | Area | Main endpoints |
 |---|---|
 | Auth | `POST /api/v1/auth/reg-email-send-otp`, `…/reg-email-verify-otp`, `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`, `GET /api/v1/auth/sessions`, password reset |
+| Auth by mobile | `POST /api/v1/auth/phone/send-otp` `{phone, purpose}`, `…/phone/verify-otp` `{phone, otp, purpose}` (login returns a session, signup returns a 10-minute signup token), `…/phone/register` `{signupToken, name, email, password, role, …}` |
 | Listings | `GET /api/v1/machines`, `GET /api/v1/machines/:id`, `GET /api/v1/machines/nearby`, `POST/PATCH/DELETE /api/v1/machines/:id` (owner), `GET /api/v1/search/*` |
 | Bookings | `GET /api/v1/bookings/quote`, `POST /api/v1/bookings`, `GET /api/v1/bookings/my`, `GET /api/v1/bookings/incoming`, `GET /api/v1/bookings/:id`, `PATCH …/accept \| reject \| cancel \| start`, `POST …/return`, `POST …/complete`, extensions, availability |
 | Payments | `POST /api/payment/create-order`, `POST /api/payment/verify`, `POST /api/payment/webhook`, refunds |

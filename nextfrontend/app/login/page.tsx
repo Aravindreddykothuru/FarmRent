@@ -10,11 +10,12 @@ import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tractor, Loader2, Eye, EyeOff, Shield, Zap, Star, Mail, Lock, AlertCircle } from 'lucide-react';
+import { Tractor, Loader2, Eye, EyeOff, Shield, Zap, Star, Mail, Lock, AlertCircle, Smartphone, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { LanguageQuickBar, NeedHelpButton } from '@/components/AuthAssist';
+import { OtpInput, PhoneField, usePhoneOtp, isIndianMobile, OTP_LENGTH } from '@/components/PhoneOtp';
 const loginSchema = z.object({
     email:    z.string().email({ message: 'Enter a valid email address' }),
     password: z.string().min(1, { message: 'Password is required' }),
@@ -28,9 +29,31 @@ function isSafeRedirect(path: string): boolean {
 function LoginForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { login } = useAuth();
+    const { login, loginWithToken } = useAuth();
     const { t } = useLanguage();
     const [showPass, setShowPass] = useState(false);
+
+    // Two ways in, side by side: the password this screen has always taken, and a code by SMS.
+    const [mode, setMode] = useState<'password' | 'otp'>('password');
+    const [phone, setPhone] = useState('');
+    const [otp, setOtp] = useState('');
+    const otpFlow = usePhoneOtp('login');
+
+    const goAfterLogin = (role: string) => {
+        const next = searchParams.get('next') ?? '';
+        if (next && isSafeRedirect(next)) { router.push(next); return; }
+        if (role === 'owner') router.push('/dashboard/owner');
+        else if (role === 'admin') router.push('/dashboard/admin');
+        else router.push('/dashboard/farmer');
+    };
+
+    const submitOtp = async (code: string) => {
+        const result = await otpFlow.verify<{ token: string; user: { role: string } }>(phone, code);
+        if (!result) { setOtp(''); return; }
+        loginWithToken(result.token, result.user as never);
+        toast.success(t('auth.loginSuccess'));
+        goAfterLogin(result.user.role);
+    };
 
     const FEATURES = [
         { icon: Tractor, text: t('auth.feature1') },
@@ -47,11 +70,7 @@ function LoginForm() {
         try {
             const { role } = await login(data.email, data.password);
             toast.success(t('auth.loginSuccess'));
-            const next = searchParams.get('next') ?? '';
-            if (next && isSafeRedirect(next)) { router.push(next); return; }
-            if (role === 'owner') router.push('/dashboard/owner');
-            else if (role === 'admin') router.push('/dashboard/admin');
-            else router.push('/dashboard/farmer');
+            goAfterLogin(role);
         } catch (err: unknown) {
             toast.error(err instanceof Error ? err.message : t('auth.loginFailed'));
         }
@@ -126,6 +145,118 @@ function LoginForm() {
                         <p className="hidden lg:block text-gray-600 mt-1 text-base">{t('auth.signInSubtitle')}</p>
                     </div>
 
+                    {/* Two ways in, shown side by side rather than one hidden behind a link. */}
+                    <div className="grid grid-cols-2 gap-2 mb-6" role="tablist" aria-label={t('auth.signIn')}>
+                        <button
+                            type="button" role="tab" suppressHydrationWarning
+                            aria-selected={mode === 'password'}
+                            onClick={() => setMode('password')}
+                            className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
+                                mode === 'password'
+                                    ? 'border-green-700 bg-green-700 text-white'
+                                    : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                            }`}
+                        >
+                            <KeyRound className="h-5 w-5" aria-hidden="true" />
+                            {t('auth.password')}
+                        </button>
+                        <button
+                            type="button" role="tab" suppressHydrationWarning
+                            aria-selected={mode === 'otp'}
+                            onClick={() => setMode('otp')}
+                            className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
+                                mode === 'otp'
+                                    ? 'border-green-700 bg-green-700 text-white'
+                                    : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                            }`}
+                        >
+                            <Smartphone className="h-5 w-5" aria-hidden="true" />
+                            {t('auth.loginWithOtp')}
+                        </button>
+                    </div>
+
+                    {mode === 'otp' ? (
+                        <div className="space-y-5">
+                            <div>
+                                <Label htmlFor="otp-phone" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-gray-800">
+                                    <Smartphone className="h-5 w-5 text-green-700" aria-hidden="true" />
+                                    {t('auth.phone')}
+                                </Label>
+                                <PhoneField
+                                    id="otp-phone"
+                                    value={phone}
+                                    onChange={v => { setPhone(v); otpFlow.reset(); setOtp(''); }}
+                                    disabled={otpFlow.sent}
+                                    invalid={phone.length > 0 && !isIndianMobile(phone)}
+                                />
+                                {phone.length > 0 && !isIndianMobile(phone) && (
+                                    <p className="text-red-600 text-sm mt-1.5 flex items-center gap-1.5">
+                                        <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                                        {t('auth.enterTenDigits')}
+                                    </p>
+                                )}
+                            </div>
+
+                            {otpFlow.sent && (
+                                <div>
+                                    <Label className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.enterOtp')}</Label>
+                                    <OtpInput
+                                        value={otp}
+                                        onChange={setOtp}
+                                        onComplete={submitOtp}
+                                        disabled={otpFlow.verifying}
+                                        invalid={!!otpFlow.error}
+                                        autoFocus
+                                    />
+                                    {otpFlow.devOtp && (
+                                        <p className="text-amber-700 text-sm mt-2">Dev code: <strong>{otpFlow.devOtp}</strong></p>
+                                    )}
+                                </div>
+                            )}
+
+                            {otpFlow.error && (
+                                <p className="text-red-600 text-sm flex items-center gap-1.5" role="alert">
+                                    <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                                    {otpFlow.error}
+                                </p>
+                            )}
+
+                            {!otpFlow.sent ? (
+                                <Button
+                                    type="button"
+                                    onClick={() => otpFlow.send(phone)}
+                                    disabled={!isIndianMobile(phone) || otpFlow.sending}
+                                    className="w-full h-14 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-lg disabled:opacity-60"
+                                >
+                                    {otpFlow.sending && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
+                                    {t('auth.sendOtp')}
+                                </Button>
+                            ) : (
+                                <>
+                                    <Button
+                                        type="button"
+                                        onClick={() => submitOtp(otp)}
+                                        disabled={otp.length !== OTP_LENGTH || otpFlow.verifying}
+                                        className="w-full h-14 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-lg disabled:opacity-60"
+                                    >
+                                        {otpFlow.verifying && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
+                                        {t('auth.verify')}
+                                    </Button>
+                                    <button
+                                        type="button"
+                                        suppressHydrationWarning
+                                        onClick={() => { setOtp(''); otpFlow.send(phone); }}
+                                        disabled={otpFlow.secondsLeft > 0 || otpFlow.sending}
+                                        className="w-full h-11 text-base font-semibold text-green-800 hover:underline disabled:text-gray-500 disabled:no-underline"
+                                    >
+                                        {otpFlow.secondsLeft > 0
+                                            ? t('auth.resendIn', { seconds: otpFlow.secondsLeft })
+                                            : t('auth.resendOtp')}
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    ) : (
                     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                         <div>
                             <Label htmlFor="email" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-gray-800">
@@ -199,6 +330,7 @@ function LoginForm() {
                                 : t('auth.signIn')}
                         </Button>
                     </form>
+                    )}
 
                     {/* Divider */}
                     <div className="relative my-6">

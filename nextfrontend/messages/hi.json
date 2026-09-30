@@ -74,7 +74,14 @@
     "logoutSuccess": "लॉग आउट हो गए",
     "chooseLanguage": "अपनी भाषा चुनें",
     "moreLanguages": "और भाषाएँ",
-    "needHelp": "मदद चाहिए? कॉल करें"
+    "needHelp": "मदद चाहिए? कॉल करें",
+    "loginWithOtp": "SMS OTP",
+    "enterTenDigits": "कृपया 10 अंकों का मोबाइल नंबर डालें",
+    "resendIn": "{seconds} सेकंड में दोबारा भेजें",
+    "verifyByPhone": "मोबाइल नंबर",
+    "verifyByEmail": "ईमेल",
+    "phoneVerifiedBadge": "नंबर सत्यापित",
+    "changeNumber": "बदलें"
   },
   "home": {
     "heroTitle": "पास के खेत उपकरण किराए पर लें",

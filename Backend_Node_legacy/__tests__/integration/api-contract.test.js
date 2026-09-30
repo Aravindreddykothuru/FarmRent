@@ -180,6 +180,46 @@ describe('API contract — every mounted route', () => {
         );
         await check('POST /api/v1/auth/reg-verify-otp', anon().post('/api/v1/auth/reg-verify-otp').send({ phone, otp: 'abcdef' }), 400);
 
+        // Signing up by mobile number: send, prove, then create the account with the token that proves it.
+        const smsPhone = randomPhone();
+        const smsOtp = await check(
+            'POST /api/v1/auth/phone/send-otp',
+            anon().post('/api/v1/auth/phone/send-otp').send({ phone: smsPhone, purpose: 'signup' }),
+            200,
+        );
+        await check('POST /api/v1/auth/phone/send-otp', anon().post('/api/v1/auth/phone/send-otp').send({ phone: '123' }), 400);
+        const proven = await check(
+            'POST /api/v1/auth/phone/verify-otp',
+            anon().post('/api/v1/auth/phone/verify-otp').send({ phone: smsPhone, otp: smsOtp.devOtp, purpose: 'signup' }),
+            200,
+        );
+        await check(
+            'POST /api/v1/auth/phone/verify-otp',
+            anon().post('/api/v1/auth/phone/verify-otp').send({ phone: smsPhone, otp: 'abcdef', purpose: 'signup' }),
+            400,
+        );
+        await check(
+            'POST /api/v1/auth/phone/register',
+            anon()
+                .post('/api/v1/auth/phone/register')
+                .send({
+                    signupToken: proven.signupToken,
+                    name: 'SMS Contract User',
+                    email: uniqueEmail('sms'),
+                    password: 'Contract@123',
+                    role: 'farmer',
+                }),
+            201,
+        );
+        await check(
+            'POST /api/v1/auth/phone/register',
+            anon()
+                .post('/api/v1/auth/phone/register')
+                .send({ signupToken: 'not-a-real-token', name: 'Nobody', email: uniqueEmail('sms'), password: 'Contract@123', role: 'farmer' }),
+            400,
+            'SIGNUP_TOKEN_INVALID',
+        );
+
         const registered = await check(
             'POST /api/v1/auth/register',
             anon().post('/api/v1/auth/register').send({ email, password: 'Contract@123', name: 'Contract User', phone, role: 'farmer' }),

@@ -1071,3 +1071,332 @@ exports.googleCallback = async (req, res, next) => {
 
 exports.issueAccessToken = issueAccessToken;
 exports.startSession = startSession;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHONE (SMS) OTP — sign in and sign up with a mobile number
+//
+// One pair of endpoints serves both purposes, so the purpose travels in the body rather than the path.
+//
+// Delivery goes through 2Factor when TWOFACTOR_API_KEY is set. In that mode the code is generated and
+// checked by 2Factor and never reaches this process, so the Redis record below holds only the session id
+// and the attempt count. Without a key the existing provider chain is used instead, which keeps
+// development working (and ends at a console OTP) without a paid account.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const twoFactor = require('../lib/twoFactorService');
+const { isAllowed } = require('../middleware/slidingWindowRateLimiter');
+
+const PHONE_OTP_EXPIRY_SEC = 10 * 60;
+const PHONE_OTP_RESEND_SEC = 60;
+const PHONE_OTP_MAX_ATTEMPTS = 3;
+const SIGNUP_TOKEN_EXPIRY_SEC = 10 * 60;
+const PHONE_OTP_PER_NUMBER_PER_HOUR = 5;
+const PHONE_OTP_PER_IP_PER_HOUR = 10;
+const HOUR_MS = 60 * 60 * 1000;
+
+const phoneOtpKey = (purpose, phone) => `potp:${purpose}:${phone}`;
+const phoneWaitKey = (phone) => `potp-wait:${phone}`;
+const signupTokenKey = (token) => `potp-signup:${token}`;
+
+/**
+ * Writes one audit row. Deliberately best-effort: an OTP must still be deliverable when the audit
+ * table is unreachable, and the counters that actually refuse a request live in Redis.
+ */
+async function recordOtpRequest(phone, ip, purpose, status) {
+    if (!supabase) return null;
+    try {
+        const { data, error } = await supabase
+            .from('otp_requests')
+            .insert({ phone, ip: ip || null, purpose, status })
+            .select('id')
+            .single();
+        if (error) throw error;
+        return data.id;
+    } catch (e) {
+        logger.warn('[auth/phone-otp] could not write audit row', { phone: twoFactor.maskPhone(phone), error: e.message });
+        return null;
+    }
+}
+
+async function updateOtpRequest(id, patch) {
+    if (!supabase || !id) return;
+    try {
+        await supabase.from('otp_requests').update(patch).eq('id', id);
+    } catch (e) {
+        logger.warn('[auth/phone-otp] could not update audit row', { error: e.message });
+    }
+}
+
+/** Finds an account by phone, tolerating the +91/91 prefixes older rows were written with. */
+async function findUserByPhone(phone) {
+    const { data, error } = await supabase
+        .from('users')
+        .select(`id, email, full_name, phone, avatar_url, status, ${USER_ROLES_SELECT}`)
+        .or(`phone.eq.${phone},phone.eq.+91${phone},phone.eq.91${phone}`)
+        .maybeSingle();
+    if (error) throw error;
+    return data;
+}
+
+// ─── SEND PHONE OTP ───────────────────────────────────────────────────────────
+exports.phoneSendOTP = async (req, res, next) => {
+    try {
+        const { phone, purpose } = req.body;
+        const masked = twoFactor.maskPhone(phone);
+
+        // One code per minute per number. The wait carries its own deadline rather than being read from
+        // the key's TTL, so it reports the same remaining time through the in-memory fallback.
+        const wait = await redisGet(phoneWaitKey(phone));
+        if (wait?.until && wait.until > Date.now()) {
+            const seconds = Math.ceil((wait.until - Date.now()) / 1000);
+            res.set('Retry-After', String(seconds));
+            return res.status(429).json({
+                code: 'OTP_RESEND_TOO_SOON',
+                error: `Please wait ${seconds} second${seconds !== 1 ? 's' : ''} to resend.`,
+                // The error envelope keeps only code, message and details, so the countdown travels there.
+                details: { resendAfter: seconds },
+            });
+        }
+
+        if (!(await isAllowed(`potp:num:${phone}`, PHONE_OTP_PER_NUMBER_PER_HOUR, HOUR_MS))) {
+            return res.status(429).json({
+                code: 'OTP_LIMIT_NUMBER',
+                error: 'Too many codes sent to this number. Please try again in an hour.',
+            });
+        }
+        if (!(await isAllowed(`potp:ip:${req.ip}`, PHONE_OTP_PER_IP_PER_HOUR, HOUR_MS))) {
+            return res.status(429).json({
+                code: 'OTP_LIMIT_IP',
+                error: 'Too many codes requested from this connection. Please try again in an hour.',
+            });
+        }
+
+        // Signing up with a number that already has an account wastes a message and cannot succeed.
+        if (purpose === 'signup' && supabase) {
+            const existing = await findUserByPhone(phone);
+            if (existing) {
+                return res.status(409).json({
+                    code: 'PHONE_TAKEN',
+                    error: 'This number already has an account. Please sign in instead.',
+                });
+            }
+        }
+
+        let record;
+        let devOtp;
+
+        if (twoFactor.isConfigured()) {
+            const sent = await twoFactor.sendOtp(phone);
+            if (!sent.ok) {
+                await recordOtpRequest(phone, req.ip, purpose, 'send_failed');
+                return res.status(503).json({
+                    code: 'OTP_PROVIDER_UNAVAILABLE',
+                    error: 'We could not send the code right now. Please try again in a moment.',
+                    retryable: true,
+                });
+            }
+            record = { via: '2factor', sessionId: sent.sessionId, attempts: 0 };
+        } else {
+            // No 2Factor key: fall back to the providers already configured, ending at a console OTP in
+            // development. The code is hashed here because, unlike the 2Factor path, this process holds it.
+            const { otp, hash, expiry } = await createOTP();
+            let provider;
+            try {
+                provider = await sendOTP(phone, otp);
+            } catch (e) {
+                logger.error('[auth/phone-otp] no OTP provider could deliver', { phone: masked, error: e.message });
+                await recordOtpRequest(phone, req.ip, purpose, 'send_failed');
+                return res.status(503).json({
+                    code: 'OTP_PROVIDER_UNAVAILABLE',
+                    error: 'We could not send the code right now. Please try again in a moment.',
+                    retryable: true,
+                });
+            }
+            record = { via: 'local', hash, expiry, attempts: 0 };
+            if (provider === 'console' && !isProduction()) devOtp = otp;
+        }
+
+        record.auditId = await recordOtpRequest(phone, req.ip, purpose, 'sent');
+        await redisSet(phoneOtpKey(purpose, phone), record, PHONE_OTP_EXPIRY_SEC);
+        await redisSet(phoneWaitKey(phone), { until: Date.now() + PHONE_OTP_RESEND_SEC * 1000 }, PHONE_OTP_RESEND_SEC);
+
+        return res.json({
+            ok: true,
+            success: true,
+            resendAfter: PHONE_OTP_RESEND_SEC,
+            message: `OTP sent to ${masked}`,
+            ...(devOtp && { devOtp, devNote: 'No SMS provider configured — code shown here for development only' }),
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+// ─── VERIFY PHONE OTP ─────────────────────────────────────────────────────────
+exports.phoneVerifyOTP = async (req, res, next) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Database not configured' });
+
+        const { phone, otp, purpose } = req.body;
+        const key = phoneOtpKey(purpose, phone);
+        const record = await redisGet(key);
+
+        if (!record) {
+            return res.status(400).json({ code: 'OTP_NOT_FOUND', error: 'That code has expired. Please request a new one.' });
+        }
+
+        record.attempts = (record.attempts || 0) + 1;
+        if (record.attempts > PHONE_OTP_MAX_ATTEMPTS) {
+            await redisDel(key);
+            await updateOtpRequest(record.auditId, { attempts: record.attempts - 1, status: 'failed' });
+            return res.status(429).json({
+                code: 'OTP_TOO_MANY_ATTEMPTS',
+                error: 'Too many wrong codes. Please request a new one.',
+            });
+        }
+        await redisSet(key, record, PHONE_OTP_EXPIRY_SEC);
+
+        let outcome;
+        if (record.via === '2factor') {
+            outcome = await twoFactor.verifyOtp(phone, otp);
+        } else {
+            const valid = await verifyOTP(otp, record.hash, record.expiry, 0);
+            outcome = valid ? { ok: true } : { ok: false, reason: new Date(record.expiry) < new Date() ? 'expired' : 'mismatch' };
+        }
+
+        if (!outcome.ok) {
+            if (outcome.reason === 'provider_down') {
+                return res.status(503).json({
+                    code: 'OTP_PROVIDER_UNAVAILABLE',
+                    error: 'We could not check that code right now. Please try again in a moment.',
+                    retryable: true,
+                });
+            }
+            if (outcome.reason === 'expired') {
+                await redisDel(key);
+                await updateOtpRequest(record.auditId, { attempts: record.attempts, status: 'failed' });
+                return res.status(400).json({ code: 'OTP_EXPIRED', error: 'That code has expired. Please request a new one.' });
+            }
+
+            const left = PHONE_OTP_MAX_ATTEMPTS - record.attempts;
+            await updateOtpRequest(record.auditId, { attempts: record.attempts });
+            return res.status(400).json({
+                code: 'INVALID_OTP',
+                error:
+                    left > 0
+                        ? `Wrong OTP, ${left} ${left === 1 ? 'try' : 'tries'} left`
+                        : 'Too many wrong codes. Please request a new one.',
+                details: { attemptsLeft: Math.max(0, left) },
+            });
+        }
+
+        await redisDel(key);
+        await redisDel(phoneWaitKey(phone));
+        await updateOtpRequest(record.auditId, { attempts: record.attempts, status: 'verified' });
+
+        if (purpose === 'login') {
+            const user = await findUserByPhone(phone);
+            if (!user) {
+                return res.status(404).json({ code: 'ACCOUNT_NOT_FOUND', error: 'Account not found, please create account' });
+            }
+            if (user.status !== 'active') {
+                return res.status(403).json({ code: 'ACCOUNT_DISABLED', error: 'This account has been disabled. Please contact support.' });
+            }
+            user.roles = rolesFromUserRow(user);
+            if (user.roles.length === 0) {
+                logger.error('[auth/phone-otp] account has no role assigned', { userId: user.id });
+                return res
+                    .status(403)
+                    .json({ code: 'ACCOUNT_MISCONFIGURED', error: 'Your account is not fully set up. Please contact support.' });
+            }
+
+            const token = await startSession(user, req, res);
+            recordLogin(user.id);
+            await clearFailures(user.email);
+            logger.info('[auth/phone-otp] signed in by SMS', { userId: user.id, phone: twoFactor.maskPhone(phone) });
+            return res.json({ ok: true, success: true, token, user: sanitize(user) });
+        }
+
+        // Signup: hand back a short-lived token that proves this number and nothing else. It is the only
+        // thing that lets step 3 create an account, so it is random, single-use and expires in ten minutes.
+        const signupToken = crypto.randomBytes(32).toString('hex');
+        await redisSet(signupTokenKey(signupToken), { phone }, SIGNUP_TOKEN_EXPIRY_SEC);
+        return res.json({
+            ok: true,
+            success: true,
+            signupToken,
+            expiresIn: SIGNUP_TOKEN_EXPIRY_SEC,
+            phoneVerified: true,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+// ─── REGISTER WITH A VERIFIED PHONE (step 3) ─────────────────────────────────
+exports.phoneRegister = async (req, res, next) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Database not configured' });
+
+        const { signupToken, name, email, password, role, village, district, state } = req.body;
+
+        const pending = await redisGet(signupTokenKey(signupToken));
+        if (!pending?.phone) {
+            return res.status(400).json({
+                code: 'SIGNUP_TOKEN_INVALID',
+                error: 'Your phone verification has expired. Please verify your number again.',
+            });
+        }
+        const phone = pending.phone;
+
+        const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+        const { data: user, error: insErr } = await supabase
+            .from('users')
+            .insert({
+                email,
+                full_name: name,
+                password_hash,
+                phone,
+                village: village || null,
+                district: district || null,
+                state: state || null,
+                // The number was proved by OTP; the address was not, and is not claimed to be.
+                phone_verified: true,
+                email_verified: false,
+            })
+            .select('id, email, full_name, phone, avatar_url, created_at')
+            .single();
+
+        if (insErr?.code === '23505') {
+            const phoneTaken = /phone/i.test(`${insErr.details} ${insErr.message}`);
+            return res.status(409).json({
+                code: phoneTaken ? 'PHONE_TAKEN' : 'EMAIL_TAKEN',
+                error: phoneTaken ? 'An account with this phone number already exists' : 'An account with this email already exists',
+            });
+        }
+        if (insErr) throw insErr;
+
+        const { error: roleErr } = await supabase.from('user_roles').insert({ user_id: user.id, role_id: ROLE_IDS[role] });
+        if (roleErr) {
+            const { error: cleanupErr } = await supabase.from('users').delete().eq('id', user.id);
+            if (cleanupErr) {
+                logger.error('[auth/phone-register] could not remove user after role assignment failed', {
+                    userId: user.id,
+                    error: cleanupErr.message,
+                });
+            }
+            throw roleErr;
+        }
+
+        user.roles = [role];
+        // Single use: the token cannot make a second account.
+        await redisDel(signupTokenKey(signupToken));
+
+        const token = await startSession(user, req, res);
+        logger.info('[auth/phone-register] account created by SMS', { userId: user.id, phone: twoFactor.maskPhone(phone) });
+        return res.status(201).json({ ok: true, token, user: sanitize(user), message: 'Registration successful.' });
+    } catch (err) {
+        next(err);
+    }
+};

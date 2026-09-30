@@ -62,6 +62,14 @@ services:
       - key: ALLOWED_ORIGINS
         value: https://farmrentcom.in,https://www.farmrentcom.in
 
+      # Signing in and up by mobile number. The key is entered in the Render dashboard and never committed;
+      # without it the phone endpoints have no way to send an SMS in production and return 503.
+      # TWOFACTOR_TEMPLATE is left empty to use 2Factor's default until the DLT "FarmRent" template is approved.
+      - key: TWOFACTOR_API_KEY
+        sync: false
+      - key: TWOFACTOR_TEMPLATE
+        value: ""
+
       # Email: MSG91 first, Gmail SMTP when MSG91 refuses or fails.
       - key: EMAIL_PROVIDERS
         value: msg91,smtp

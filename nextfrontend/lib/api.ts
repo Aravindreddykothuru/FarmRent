@@ -72,6 +72,26 @@ function endExpiredSession() {
     }
 }
 
+/**
+ * An API error that keeps the server's machine-readable parts.
+ *
+ * The client used to throw a bare Error, so `code` and `details` were lost and a caller could only match on
+ * message text. It still extends Error, so every existing `err instanceof Error ? err.message` keeps working.
+ */
+export class ApiError extends Error {
+    readonly status: number;
+    readonly code?: string;
+    readonly details?: Record<string, unknown>;
+
+    constructor(message: string, status: number, code?: string, details?: Record<string, unknown>) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+        this.code = code;
+        this.details = details;
+    }
+}
+
 // ─── Unwrap standard API envelope { success, data, error, timestamp } ───────
 function unwrapEnvelope<T>(body: unknown): T {
     if (
@@ -85,10 +105,10 @@ function unwrapEnvelope<T>(body: unknown): T {
         const env = body as {
             success: boolean;
             data: T;
-            error: { message?: string } | null;
+            error: { message?: string; code?: string; details?: Record<string, unknown> } | null;
         };
         if (!env.success && env.error) {
-            throw new Error(env.error.message || 'Request failed');
+            throw new ApiError(env.error.message || 'Request failed', 200, env.error.code, env.error.details);
         }
         return env.data;
     }
@@ -147,17 +167,22 @@ async function request<T>(
 
     if (!res.ok) {
         let errorMsg = `HTTP ${res.status}`;
+        let code: string | undefined;
+        let details: Record<string, unknown> | undefined;
         try {
             const body = await res.json();
             if (body && typeof body === 'object') {
                 if (body.error && typeof body.error === 'object' && body.error.message) {
                     errorMsg = body.error.message;
+                    code = body.error.code;
+                    details = body.error.details;
                 } else {
                     errorMsg = body.message ?? body.error ?? errorMsg;
+                    code = body.code;
                 }
             }
         } catch { /* ignore */ }
-        throw new Error(String(errorMsg));
+        throw new ApiError(String(errorMsg), res.status, code, details);
     }
 
     if (res.status === 204) return undefined as T;

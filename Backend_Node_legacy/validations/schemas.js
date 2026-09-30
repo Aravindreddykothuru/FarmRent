@@ -308,6 +308,32 @@ exports.loginSendOTPSchema = z.object({ email: emailSchema });
 
 exports.loginVerifyOTPSchema = z.object({ email: emailSchema, otp: otpSchema });
 
+// ── Phone (SMS) OTP — login and signup ───────────────────────────────────────
+// One pair of endpoints serves both, so the purpose is part of the request rather than the path.
+exports.phoneSendOTPSchema = z.object({
+    phone: mobileSchema,
+    purpose: z.enum(['login', 'signup']).default('login'),
+});
+
+exports.phoneVerifyOTPSchema = z.object({
+    phone: mobileSchema,
+    otp: otpSchema,
+    purpose: z.enum(['login', 'signup']),
+});
+
+// Step 3 of signing up by phone. The number is already proven, so it is carried by the signup token
+// rather than the body; an email is still required because a user row cannot exist without one.
+exports.phoneRegisterSchema = z.object({
+    signupToken: z.string().min(1, 'Signup token is required'),
+    name: z.string().trim().min(2, 'Name too short').max(100),
+    email: emailSchema,
+    password: passwordSchema,
+    role: z.enum(['farmer', 'owner']).default('farmer'),
+    village: z.string().trim().max(100).optional(),
+    district: z.string().trim().max(100).optional(),
+    state: z.string().trim().max(100).optional(),
+});
+
 // ── Payments ─────────────────────────────────────────────────────────────────
 
 // The order amount is derived from the booking on the server; only the booking is identified here.

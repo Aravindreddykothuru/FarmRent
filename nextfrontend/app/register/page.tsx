@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
-    Tractor, Loader2, Eye, EyeOff, CheckCircle2, IndianRupee, MailCheck, Mail, AlertCircle,
+    Tractor, Loader2, Eye, EyeOff, CheckCircle2, IndianRupee, MailCheck, Mail, AlertCircle, Smartphone,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
@@ -19,6 +19,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { nodeApi } from '@/lib/api';
 import PincodeField, { PincodeResult } from '@/components/PincodeField';
 import { LanguageQuickBar, NeedHelpButton } from '@/components/AuthAssist';
+import { OtpInput, PhoneField, usePhoneOtp, isIndianMobile, OTP_LENGTH } from '@/components/PhoneOtp';
 
 type EmailStep = 'idle' | 'sending' | 'awaiting_otp' | 'verifying' | 'verified';
 
@@ -130,7 +131,7 @@ type RegisterForm = z.infer<typeof registerSchema>;
 function RegisterInner() {
     const router        = useRouter();
     const searchParams  = useSearchParams();
-    const { register: authRegister } = useAuth();
+    const { register: authRegister, loginWithToken } = useAuth();
     const { t } = useLanguage();
 
     const OWNER_PERKS  = [t('register.ownerPerk1'), t('register.ownerPerk2'), t('register.ownerPerk3'), t('register.ownerPerk4')];
@@ -140,6 +141,12 @@ function RegisterInner() {
     const [showConf,        setShowConf]       = useState(false);
     const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
     const [passwordValue,   setPasswordValue]  = useState('');
+
+    /* Which channel proves this person before the form unlocks. Either works; both reach the same account. */
+    const [verifyBy, setVerifyBy] = useState<'email' | 'phone'>('email');
+    const [signupToken, setSignupToken] = useState<string | null>(null);
+    const [otpValue, setOtpValue] = useState('');
+    const phoneOtp = usePhoneOtp('signup');
 
     /* Email OTP state */
     const [emailStep,     setEmailStep]    = useState<EmailStep>('idle');
@@ -226,14 +233,44 @@ function RegisterInner() {
         setValue('state',    result.state,   opts);
     };
 
+    /* Either channel unlocks the rest of the form. */
+    const verified = verifyBy === 'email' ? emailStep === 'verified' : !!signupToken;
+
+    /** Proves the number, then keeps the signup token that step 3 needs. */
+    const verifyPhone = async (code: string) => {
+        const phone = watch('phone');
+        const res = await phoneOtp.verify<{ signupToken: string }>(phone, code);
+        if (!res) { setOtpValue(''); return; }
+        setSignupToken(res.signupToken);
+    };
+
     /* ── Form submit ── */
     const onSubmit = async (data: RegisterForm) => {
-        if (emailStep !== 'verified') {
-            toast.error('Please verify your email first');
+        if (!verified) {
+            toast.error(verifyBy === 'email' ? 'Please verify your email first' : 'Please verify your mobile number first');
             return;
         }
         try {
             const { confirmPassword: _, ...payload } = data;
+
+            if (verifyBy === 'phone' && signupToken) {
+                // The number is already proved, so it travels in the token rather than the body.
+                const res = await nodeApi.post<{ token: string; user: { role: string } }>('/auth/phone/register', {
+                    signupToken,
+                    name: payload.name,
+                    email: payload.email,
+                    password: payload.password,
+                    role: payload.role,
+                    village: payload.village || undefined,
+                    district: payload.district || undefined,
+                    state: payload.state || undefined,
+                });
+                loginWithToken(res.token, res.user as never);
+                toast.success(t('auth.accountCreated'));
+                router.push(payload.role === 'owner' ? '/dashboard/owner' : '/dashboard/farmer');
+                return;
+            }
+
             await authRegister({
                 ...payload,
                 pincode:  payload.pincode  || undefined,
@@ -369,7 +406,7 @@ function RegisterInner() {
                             <p className="text-gray-700 text-base mt-1">{t('auth.createAccountSubtitle')}</p>
                         </div>
 
-                        <StepProgress current={emailStep === 'verified' ? 2 : 1} />
+                        <StepProgress current={verified ? 2 : 1} />
 
                         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
 
@@ -408,7 +445,127 @@ function RegisterInner() {
                                 />
                             </div>
 
+                            {/* ── Prove who you are: email or mobile, whichever the person can use ── */}
+                            <div className="grid grid-cols-2 gap-2" role="tablist" aria-label={t('auth.iWantTo')}>
+                                <button
+                                    type="button" role="tab" suppressHydrationWarning
+                                    aria-selected={verifyBy === 'email'}
+                                    onClick={() => setVerifyBy('email')}
+                                    className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
+                                        verifyBy === 'email'
+                                            ? 'border-green-700 bg-green-700 text-white'
+                                            : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                                    }`}
+                                >
+                                    <Mail className="h-5 w-5" aria-hidden="true" />
+                                    {t('auth.verifyByEmail')}
+                                </button>
+                                <button
+                                    type="button" role="tab" suppressHydrationWarning
+                                    aria-selected={verifyBy === 'phone'}
+                                    onClick={() => setVerifyBy('phone')}
+                                    className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
+                                        verifyBy === 'phone'
+                                            ? 'border-green-700 bg-green-700 text-white'
+                                            : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                                    }`}
+                                >
+                                    <Smartphone className="h-5 w-5" aria-hidden="true" />
+                                    {t('auth.verifyByPhone')}
+                                </button>
+                            </div>
+
+                            {verifyBy === 'phone' && (
+                                <div className="border-2 border-dashed border-gray-200 rounded-2xl p-4 space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <Smartphone className="h-5 w-5 text-green-700" aria-hidden="true" />
+                                        <span className="text-base font-bold text-gray-800">{t('auth.verifyByPhone')}</span>
+                                        {signupToken && (
+                                            <span className="ml-auto flex items-center gap-1 text-sm font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                                                <CheckCircle2 className="h-4 w-4" /> {t('auth.phoneVerifiedBadge')}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <PhoneField
+                                        id="signup-phone"
+                                        value={watch('phone') ?? ''}
+                                        onChange={v => {
+                                            setValue('phone', v, { shouldDirty: true });
+                                            setSignupToken(null);
+                                            setOtpValue('');
+                                            phoneOtp.reset();
+                                        }}
+                                        disabled={!!signupToken || phoneOtp.sent}
+                                        invalid={!!watch('phone') && !isIndianMobile(watch('phone'))}
+                                    />
+
+                                    {!signupToken && phoneOtp.sent && (
+                                        <div className="space-y-2">
+                                            <OtpInput
+                                                value={otpValue}
+                                                onChange={setOtpValue}
+                                                onComplete={verifyPhone}
+                                                disabled={phoneOtp.verifying}
+                                                invalid={!!phoneOtp.error}
+                                                autoFocus
+                                            />
+                                            {phoneOtp.devOtp && (
+                                                <p className="text-amber-700 text-sm">Dev code: <strong>{phoneOtp.devOtp}</strong></p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {phoneOtp.error && (
+                                        <p className="text-red-600 text-sm flex items-center gap-1.5" role="alert">
+                                            <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                                            {phoneOtp.error}
+                                        </p>
+                                    )}
+
+                                    {!signupToken && (
+                                        <div className="flex flex-wrap gap-2">
+                                            {!phoneOtp.sent ? (
+                                                <Button
+                                                    type="button"
+                                                    onClick={() => phoneOtp.send(watch('phone'))}
+                                                    disabled={!isIndianMobile(watch('phone') ?? '') || phoneOtp.sending}
+                                                    className="h-12 px-5 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base disabled:opacity-60"
+                                                >
+                                                    {phoneOtp.sending && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
+                                                    {t('auth.sendOtp')}
+                                                </Button>
+                                            ) : (
+                                                <>
+                                                    <Button
+                                                        type="button"
+                                                        onClick={() => verifyPhone(otpValue)}
+                                                        disabled={otpValue.length !== OTP_LENGTH || phoneOtp.verifying}
+                                                        className="h-12 px-5 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base disabled:opacity-60"
+                                                    >
+                                                        {phoneOtp.verifying && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
+                                                        {t('auth.verify')}
+                                                    </Button>
+                                                    <button
+                                                        type="button"
+                                                        suppressHydrationWarning
+                                                        onClick={() => { setOtpValue(''); phoneOtp.send(watch('phone')); }}
+                                                        disabled={phoneOtp.secondsLeft > 0 || phoneOtp.sending}
+                                                        className="h-12 px-3 text-base font-semibold text-green-800 hover:underline disabled:text-gray-500 disabled:no-underline"
+                                                    >
+                                                        {phoneOtp.secondsLeft > 0
+                                                            ? t('auth.resendIn', { seconds: phoneOtp.secondsLeft })
+                                                            : t('auth.resendOtp')}
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {/* ── Email OTP verification ── */}
+                            {verifyBy === 'email' && (
                             <div className="border-2 border-dashed border-gray-200 rounded-2xl p-4 space-y-3">
                                 <div className="flex items-center gap-2">
                                     <Mail className="h-4 w-4 text-green-700" />
@@ -498,9 +655,10 @@ function RegisterInner() {
                                     </>
                                 )}
                             </div>
+                            )}
 
-                            {/* ── Rest of form (locked until email verified) ── */}
-                            <div className={`space-y-3 transition-opacity duration-300 ${emailStep !== 'verified' ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+                            {/* ── Rest of form (locked until the person is proved, by either channel) ── */}
+                            <div className={`space-y-3 transition-opacity duration-300 ${!verified ? 'opacity-40 pointer-events-none select-none' : ''}`}>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div className="sm:col-span-2">
                                         <Label htmlFor="name" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.name')} *</Label>
@@ -582,12 +740,12 @@ function RegisterInner() {
                                 type="submit"
                                 size="lg"
                                 className="w-full h-14 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-lg disabled:opacity-60"
-                                disabled={isSubmitting || emailStep !== 'verified'}
+                                disabled={isSubmitting || !verified}
                             >
                                 {isSubmitting
                                     ? <><Loader2 className="h-5 w-5 animate-spin mr-2" />{t('auth.creatingAccount')}</>
-                                    : emailStep !== 'verified'
-                                    ? 'Verify email to continue'
+                                    : !verified
+                                    ? (verifyBy === 'email' ? 'Verify email to continue' : 'Verify your number to continue')
                                     : t(role === 'owner' ? 'auth.createOwnerAccount' : 'auth.createFarmerAccount')}
                             </Button>
                         </form>

@@ -21,6 +21,9 @@ const {
     regEmailVerifyOTP,
     loginSendOTP,
     loginVerifyOTP,
+    phoneSendOTP,
+    phoneVerifyOTP,
+    phoneRegister,
     listSessions,
     logoutSession,
     googleLogin,
@@ -41,6 +44,9 @@ const {
     regEmailVerifyOTPSchema,
     loginSendOTPSchema,
     loginVerifyOTPSchema,
+    phoneSendOTPSchema,
+    phoneVerifyOTPSchema,
+    phoneRegisterSchema,
 } = require('../../validations/schemas');
 
 router.get('/', (req, res) => res.json({ message: 'Auth Service Online' }));
@@ -114,5 +120,13 @@ router.post('/reg-email-verify-otp', otpVerifyLimiter, validate(regEmailVerifyOT
 // ── Email OTP for login (no auth) ─────────────────────────────────────────────────
 router.post('/login-send-otp', otpSendLimiter, validate(loginSendOTPSchema), loginSendOTP);
 router.post('/login-verify-otp', otpVerifyLimiter, validate(loginVerifyOTPSchema), loginVerifyOTP);
+
+// ── Phone (SMS) OTP for signing in and signing up (no auth) ──────────────────────
+// Nested under /phone because /send-otp and /verify-otp above already mean something else: verifying a
+// number on an account you are already signed in to. The handlers enforce their own per-number and per-IP
+// limits, which are tighter than otpSendLimiter because each send costs an SMS.
+router.post('/phone/send-otp', loginIpLimiter, validate(phoneSendOTPSchema), phoneSendOTP);
+router.post('/phone/verify-otp', otpVerifyLimiter, validate(phoneVerifyOTPSchema), phoneVerifyOTP);
+router.post('/phone/register', loginIpLimiter, validate(phoneRegisterSchema), phoneRegister);
 
 module.exports = router;
