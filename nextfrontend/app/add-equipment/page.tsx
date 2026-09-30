@@ -274,7 +274,7 @@ export default function AddEquipmentPage() {
                                     <Label htmlFor="loc-district" className="mb-1.5 block text-xs font-semibold">{t('auth.district')}</Label>
                                     <Input
                                         id="loc-district"
-                                        placeholder="e.g. Nalgonda" className="text-sm"
+                                        placeholder="e.g. Chittoor" className="text-sm"
                                         value={form.district}
                                         onChange={e => set('district', e.target.value)}
                                     />
@@ -283,7 +283,7 @@ export default function AddEquipmentPage() {
                                     <Label htmlFor="loc-state" className="mb-1.5 block text-xs font-semibold">{t('auth.state')}</Label>
                                     <Input
                                         id="loc-state"
-                                        placeholder="e.g. Telangana" className="text-sm"
+                                        placeholder="e.g. Andhra Pradesh" className="text-sm"
                                         value={form.state}
                                         onChange={e => set('state', e.target.value)}
                                     />

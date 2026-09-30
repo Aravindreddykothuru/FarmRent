@@ -55,7 +55,7 @@ function MapInner({ machines }: Props) {
             withCoords[0].location!.coordinates!.coordinates![1],
             withCoords[0].location!.coordinates!.coordinates![0],
         ]
-        : [17.385, 78.4867]; // Hyderabad fallback
+        : [13.6288, 79.4192]; // Tirupathi fallback
 
     return (
         <MapContainer center={center} zoom={8} style={{ height: '100%', width: '100%' }}>

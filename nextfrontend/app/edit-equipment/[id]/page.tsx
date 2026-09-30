@@ -48,7 +48,7 @@ export default function EditEquipmentPage() {
         operatorIncluded: false,
         village: '',
         district: '',
-        state: 'Telangana',
+        state: 'Andhra Pradesh',
         status: 'available',
         features: '',
         serviceRadiusKm: '50',
@@ -76,7 +76,7 @@ export default function EditEquipmentPage() {
                     operatorIncluded: !!m.pricing?.operatorIncluded,
                     village: m.location?.village ?? '',
                     district: m.location?.district ?? '',
-                    state: m.location?.state ?? 'Telangana',
+                    state: m.location?.state ?? 'Andhra Pradesh',
                     status: m.status ?? 'available',
                     features: Array.isArray(m.features) ? m.features.join(', ') : '',
                     serviceRadiusKm: String(m.service_radius_km ?? '50'),
@@ -246,11 +246,11 @@ export default function EditEquipmentPage() {
                                 </div>
                                 <div>
                                     <Label className="mb-1.5 block text-xs">{t('editEquipment.district')}</Label>
-                                    <Input placeholder="e.g. Nalgonda" className="text-sm" value={form.district} onChange={e => set('district', e.target.value)} />
+                                    <Input placeholder="e.g. Chittoor" className="text-sm" value={form.district} onChange={e => set('district', e.target.value)} />
                                 </div>
                                 <div>
                                     <Label className="mb-1.5 block text-xs">{t('editEquipment.state')}</Label>
-                                    <Input placeholder="e.g. Telangana" className="text-sm" value={form.state} onChange={e => set('state', e.target.value)} />
+                                    <Input placeholder="e.g. Andhra Pradesh" className="text-sm" value={form.state} onChange={e => set('state', e.target.value)} />
                                 </div>
                             </div>
                         </CardContent>
