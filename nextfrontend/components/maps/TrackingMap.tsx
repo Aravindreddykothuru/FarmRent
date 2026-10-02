@@ -4,6 +4,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { LocationPoint } from '@/hooks/useEquipmentTracking';
+import { MAP_COLORS } from '@/lib/mapColors';
 
 interface TrackingMapProps {
   currentLocation:  LocationPoint | null;
@@ -21,7 +22,7 @@ function tractorIconHtml(signalLost: boolean) {
     <div style="
       display:flex;align-items:center;justify-content:center;
       width:40px;height:40px;
-      background:${signalLost ? '#9CA3AF' : '#16A34A'};
+      background:${signalLost ? MAP_COLORS.SIGNAL_LOST : MAP_COLORS.SIGNAL_LIVE};
       border-radius:50%;border:3px solid white;
       box-shadow:0 2px 8px rgba(0,0,0,0.3);
       font-size:20px;
@@ -34,7 +35,7 @@ function pickupIconHtml() {
     <div style="
       display:flex;align-items:center;justify-content:center;
       width:36px;height:36px;
-      background:#2563EB;border-radius:50%;border:3px solid white;
+      background:${MAP_COLORS.SIGNAL_CONNECTING};border-radius:50%;border:3px solid white;
       box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:18px;
     ">📍</div>`;
 }
@@ -55,14 +56,21 @@ export default function TrackingMap({
   const accuracyCircleRef   = useRef<unknown>(null);
   const pickupMarkerRef     = useRef<unknown>(null);
   const pathPolylineRef     = useRef<unknown>(null);
-  const initializedRef      = useRef(false);
 
   // ── Initialise map (once on mount) ────────────────────────────────────────
   useEffect(() => {
-    if (initializedRef.current || !containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    async function init() {
+    // The map is created after an await, and React mounts, unmounts and remounts this component in
+    // development. An unmount can therefore land mid-await: the cleanup would find no map to remove, and the
+    // second mount would call L.map() on the container the first mount was still attaching to — which Leaflet
+    // refuses with "Map container is already initialized". Track the pending creation instead of a flag.
+    let cancelled = false;
+
+    const ready = (async () => {
       const L = (await import('leaflet')).default;
+      if (cancelled) return null;
 
       // Fix Next.js default icon path bug
       delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
@@ -117,8 +125,8 @@ export default function TrackingMap({
         if (currentLocation.accuracy) {
           const circle = L.circle([currentLocation.lat, currentLocation.lng], {
             radius:      currentLocation.accuracy,
-            color:       '#16A34A',
-            fillColor:   '#16A34A',
+            color:       MAP_COLORS.SIGNAL_LIVE,
+            fillColor:   MAP_COLORS.SIGNAL_LIVE,
             fillOpacity: 0.08,
             weight:      1,
           }).addTo(map);
@@ -128,7 +136,7 @@ export default function TrackingMap({
 
       // Path polyline — added only when showPath is true initially
       const polyline = L.polyline([], {
-        color:     '#3B82F6',
+        color:     MAP_COLORS.PATH_LINE,
         weight:    3,
         opacity:   0.65,
         dashArray: '6, 4',
@@ -136,19 +144,30 @@ export default function TrackingMap({
       if (showPath) polyline.addTo(map);
       pathPolylineRef.current = polyline;
 
-      mapRef.current     = map;
-      initializedRef.current = true;
-    }
-
-    init();
+      mapRef.current = map;
+      if (cancelled) {
+        map.remove();
+        mapRef.current = null;
+        return null;
+      }
+      return map;
+    })();
 
     return () => {
-      const m = mapRef.current as { remove?: () => void } | null;
-      if (m?.remove) {
-        m.remove();
-        mapRef.current     = null;
-        initializedRef.current = false;
-      }
+      cancelled = true;
+      // Wait for the pending creation before tearing down, so a map created after this cleanup is still
+      // removed. The marker refs belong to that map and must not outlive it.
+      ready
+        .then((created) => {
+          const m = (mapRef.current ?? created) as { remove?: () => void } | null;
+          m?.remove?.();
+          mapRef.current            = null;
+          equipmentMarkerRef.current = null;
+          accuracyCircleRef.current  = null;
+          pickupMarkerRef.current    = null;
+          pathPolylineRef.current    = null;
+        })
+        .catch(() => {});
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally runs once — subsequent prop changes handled below
@@ -186,8 +205,8 @@ export default function TrackingMap({
         if (!accuracyCircleRef.current) {
           const circle = L.circle(newLL, {
             radius:      currentLocation!.accuracy,
-            color:       '#16A34A',
-            fillColor:   '#16A34A',
+            color:       MAP_COLORS.SIGNAL_LIVE,
+            fillColor:   MAP_COLORS.SIGNAL_LIVE,
             fillOpacity: 0.08,
             weight:      1,
           }).addTo(mapRef.current as unknown as L.Map);

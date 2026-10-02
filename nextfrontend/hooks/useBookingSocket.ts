@@ -12,7 +12,8 @@
  *  • Clean teardown on unmount
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { Socket } from 'socket.io-client';
+import { connectTrackingSocket } from '../lib/socket';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -63,13 +64,6 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function getSocketOrigin(): string {
-    const fromEnv = (process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
-    if (fromEnv) return fromEnv;
-    if (typeof window !== 'undefined') return window.location.origin;
-    return 'http://localhost:3000';
-}
-
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useBookingSocket(
@@ -83,7 +77,6 @@ export function useBookingSocket(
     });
 
     const socketRef       = useRef<Socket | null>(null);
-    const retryCount      = useRef(0);
     const lastRouteFetch  = useRef<{ lat: number; lng: number } | null>(null);
     const etaTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -119,78 +112,73 @@ export function useBookingSocket(
         if (typeof window === 'undefined') return;
 
         let destroyed = false;
+        const socket = connectTrackingSocket();
+        socketRef.current = socket;
 
-        const connect = () => {
+        const onConnect = () => {
             if (destroyed) return;
-
-            const token = localStorage.getItem('authToken');
-            const socket = io(`${getSocketOrigin()}/tracking`, {
-                auth:    { token },
-                transports: ['websocket', 'polling'],
-                reconnectionAttempts: 20,
-                reconnectionDelay: Math.min(500 * 2 ** retryCount.current, 30000),
-                timeout: 10000,
-            });
-            socketRef.current = socket;
-
-            setState(s => ({ ...s, connectionState: 'connecting' }));
-
-            socket.on('connect', () => {
-                if (destroyed) return;
-                retryCount.current = 0;
-                setState(s => ({ ...s, isConnected: true, connectionState: 'connected' }));
-                socket.emit('join_booking_room', bookingId);
-            });
-
-            socket.on('reconnect_attempt', () => {
-                setState(s => ({ ...s, connectionState: 'reconnecting' }));
-            });
-
-            socket.on('disconnect', (reason) => {
-                setState(s => ({ ...s, isConnected: false, connectionState: 'disconnected' }));
-                if (reason === 'io server disconnect') {
-                    // Server closed connection — manual reconnect with back-off
-                    retryCount.current++;
-                    setTimeout(connect, Math.min(1000 * 2 ** retryCount.current, 30000));
-                }
-                // For transport issues Socket.IO auto-reconnects
-            });
-
-            // ── GPS location stream ─────────────────────────────────────────
-            socket.on('location_update', (data: LocationData) => {
-                if (destroyed) return;
-                setState(s => ({ ...s, location: data }));
-                maybeRefreshRoute(data);
-            });
-
-            // ── Booking lifecycle ───────────────────────────────────────────
-            socket.on('booking:status_changed', (data: BookingStatus) => {
-                if (destroyed) return;
-                setState(s => ({ ...s, status: data }));
-            });
-
-            // ── Route / ETA refresh (from server OSRM recalc) ──────────────
-            socket.on('route_update', (data: RouteUpdate) => {
-                if (destroyed) return;
-                setState(s => ({ ...s, routeUpdate: data }));
-            });
-
-            socket.on('eta_update', (data: RouteUpdate) => {
-                if (destroyed) return;
-                setState(s => ({ ...s, routeUpdate: data }));
-            });
+            setState(s => ({ ...s, isConnected: true, connectionState: 'connected' }));
+            socket.emit('join_booking_room', bookingId);
         };
 
-        connect();
+        const onReconnectAttempt = () => {
+            setState(s => ({ ...s, connectionState: 'reconnecting' }));
+        };
+
+        const onDisconnect = () => {
+            setState(s => ({ ...s, isConnected: false, connectionState: 'disconnected' }));
+        };
+
+        const onLocationUpdate = (data: LocationData) => {
+            if (destroyed) return;
+            setState(s => ({ ...s, location: data }));
+            maybeRefreshRoute(data);
+        };
+
+        const onBookingStatusChanged = (data: BookingStatus) => {
+            if (destroyed) return;
+            setState(s => ({ ...s, status: data }));
+        };
+
+        const onRouteUpdate = (data: RouteUpdate) => {
+            if (destroyed) return;
+            setState(s => ({ ...s, routeUpdate: data }));
+        };
+
+        const onEtaUpdate = (data: RouteUpdate) => {
+            if (destroyed) return;
+            setState(s => ({ ...s, routeUpdate: data }));
+        };
+
+        // Wire listeners
+        if (socket.connected) {
+            onConnect();
+        } else {
+            socket.on('connect', onConnect);
+        }
+        socket.on('reconnect_attempt', onReconnectAttempt);
+        socket.on('disconnect', onDisconnect);
+        socket.on('location_update', onLocationUpdate);
+        socket.on('booking:status_changed', onBookingStatusChanged);
+        socket.on('route_update', onRouteUpdate);
+        socket.on('eta_update', onEtaUpdate);
 
         return () => {
             destroyed = true;
             if (etaTimerRef.current) clearTimeout(etaTimerRef.current);
-            if (socketRef.current) {
-                socketRef.current.emit('leave_booking_room', bookingId);
-                socketRef.current.disconnect();
-                socketRef.current = null;
-            }
+            
+            socket.emit('leave_booking_room', bookingId);
+            
+            // Remove listeners from shared singleton
+            socket.off('connect', onConnect);
+            socket.off('reconnect_attempt', onReconnectAttempt);
+            socket.off('disconnect', onDisconnect);
+            socket.off('location_update', onLocationUpdate);
+            socket.off('booking:status_changed', onBookingStatusChanged);
+            socket.off('route_update', onRouteUpdate);
+            socket.off('eta_update', onEtaUpdate);
+            
+            socketRef.current = null;
         };
     }, [bookingId, maybeRefreshRoute]);
 

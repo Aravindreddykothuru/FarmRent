@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { Clock, Navigation, Zap } from 'lucide-react';
+import { MAP_COLORS } from '@/lib/mapColors';
 
 interface Props {
     eta_minutes?:   number | null;
@@ -55,9 +56,9 @@ export default function LiveETABadge({
                 className="flex items-center gap-3 rounded-2xl px-6 py-4 shadow-lg"
                 style={{
                     background: fresh
-                        ? 'linear-gradient(135deg, #15803d, #16a34a)'
+                        ? `linear-gradient(135deg, ${MAP_COLORS.PIN_GREEN_END}, ${MAP_COLORS.PIN_GREEN_START})`
                         : 'linear-gradient(135deg, #1e293b, #334155)',
-                    border: `1px solid ${fresh ? '#16a34a' : '#475569'}`,
+                    border: `1px solid ${fresh ? MAP_COLORS.PIN_GREEN_START : '#475569'}`,
                     transition: 'background 0.6s, border-color 0.6s',
                     boxShadow: fresh ? '0 0 20px rgba(22,163,74,0.35)' : '0 4px 20px rgba(0,0,0,0.2)',
                 }}

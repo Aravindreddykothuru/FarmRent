@@ -12,7 +12,8 @@
  *  • Background-to-foreground resume without re-mounting
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { Socket } from 'socket.io-client';
+import { connectTrackingSocket } from '../lib/socket';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -72,13 +73,6 @@ function getQuality(accuracy: number): GPSQuality {
     return 'none';
 }
 
-function getSocketOrigin(): string {
-    const fromEnv = (process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
-    if (fromEnv) return fromEnv;
-    if (typeof window !== 'undefined') return window.location.origin;
-    return 'http://localhost:3000';
-}
-
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useDriverGPS(
@@ -103,6 +97,22 @@ export function useDriverGPS(
     const retryCount   = useRef(0);
     const isVisible    = useRef(true);
 
+    const flushBatch = useCallback(async () => {
+        if (!pendingBatch.current.length) return;
+        const batch = [...pendingBatch.current];
+        pendingBatch.current = [];
+        // Send last point via REST fallback (same-origin; the session cookie authenticates it)
+        const last = batch[batch.length - 1] as Record<string, unknown>;
+        try {
+            await fetch('/api/v1/tracking/driver-location', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...last, bookingId }),
+            });
+        } catch { /* offline — drop */ }
+    }, [bookingId]);
+
     const sendLocation = useCallback((pos: GPSPosition, socket: Socket | null) => {
         if (!driverId) return;
         const payload = {
@@ -123,30 +133,13 @@ export function useDriverGPS(
             pendingBatch.current.push(payload);
             if (pendingBatch.current.length >= 5) flushBatch();
         }
-    }, [driverId, bookingId]);
-
-    const flushBatch = useCallback(async () => {
-        if (!pendingBatch.current.length) return;
-        const batch = [...pendingBatch.current];
-        pendingBatch.current = [];
-        // Send last point via REST fallback
-        const last = batch[batch.length - 1] as Record<string, unknown>;
-        try {
-            const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
-            await fetch('/api/v1/tracking/driver-location', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-                body: JSON.stringify({ ...last, bookingId }),
-            });
-        } catch { /* offline — drop */ }
-    }, [bookingId]);
+    }, [driverId, bookingId, flushBatch]);
 
     useEffect(() => {
         if (!enabled || !driverId) return;
         if (typeof window === 'undefined') return;
+        const latFilter = latKalman.current;
+        const lngFilter = lngKalman.current;
 
         // ── Page Visibility API ──────────────────────────────────────────────
         const onVisChange = () => {
@@ -159,46 +152,35 @@ export function useDriverGPS(
         };
         document.addEventListener('visibilitychange', onVisChange);
 
-        // ── Socket.IO connection with exponential back-off ──────────────────
-        const token = localStorage.getItem('authToken');
-        const connectSocket = () => {
-            const socket = io(`${getSocketOrigin()}/tracking`, {
-                auth: { token },
-                transports: ['websocket', 'polling'],
-                reconnectionAttempts: 15,
-                reconnectionDelay: Math.min(1000 * 2 ** retryCount.current, 30000),
-                timeout: 10000,
-            });
-            socketRef.current = socket;
+        // ── Socket.IO connection via singleton ───────────────────────────────
+        const socket = connectTrackingSocket();
+        socketRef.current = socket;
 
-            socket.on('connect', () => {
-                retryCount.current = 0;
-                setState(s => ({ ...s, isConnected: true, isTransmitting: true }));
-                // Register as driver
-                socket.emit('driver:register', { driverId });
-                if (bookingId) socket.emit('driver:trip_started', { driverId, bookingId });
-                // Flush any queued REST batch immediately
-                flushBatch();
-            });
-
-            socket.on('disconnect', (reason) => {
-                setState(s => ({ ...s, isConnected: false, isTransmitting: false }));
-                // Socket.IO auto-reconnects unless manually disconnected
-                if (reason === 'io server disconnect') {
-                    retryCount.current++;
-                    setTimeout(connectSocket, Math.min(1000 * 2 ** retryCount.current, 30000));
-                }
-            });
-
-            socket.on('gps:rejected', () => { /* server rejected GPS point */ });
-
-            socket.on('gps:warning', () => { /* server GPS warning */ });
-
-            socket.on('force_disconnect', () => {
-                socket.disconnect();
-            });
+        const onConnect = () => {
+            retryCount.current = 0;
+            setState(s => ({ ...s, isConnected: true, isTransmitting: true }));
+            // Register as driver
+            socket.emit('driver:register', { driverId });
+            if (bookingId) socket.emit('driver:trip_started', { driverId, bookingId });
+            // Flush any queued REST batch immediately
+            flushBatch();
         };
-        connectSocket();
+
+        const onDisconnect = () => {
+            setState(s => ({ ...s, isConnected: false, isTransmitting: false }));
+        };
+
+        const onGpsRejected = () => {};
+        const onGpsWarning = () => {};
+
+        if (socket.connected) {
+            onConnect();
+        } else {
+            socket.on('connect', onConnect);
+        }
+        socket.on('disconnect', onDisconnect);
+        socket.on('gps:rejected', onGpsRejected);
+        socket.on('gps:warning', onGpsWarning);
 
         // ── Geolocation watch ────────────────────────────────────────────────
         if (!navigator.geolocation) {
@@ -262,15 +244,18 @@ export function useDriverGPS(
                 if (driverId && bookingId) {
                     socketRef.current.emit('driver:trip_ended', { driverId, bookingId });
                 }
-                socketRef.current.disconnect();
+                socketRef.current.off('connect', onConnect);
+                socketRef.current.off('disconnect', onDisconnect);
+                socketRef.current.off('gps:rejected', onGpsRejected);
+                socketRef.current.off('gps:warning', onGpsWarning);
             }
             flushBatch();
-            latKalman.current.reset();
-            lngKalman.current.reset();
+            latFilter.reset();
+            lngFilter.reset();
             prevHeading.current = null;
             setState(s => ({ ...s, isConnected: false, isTransmitting: false }));
         };
-    }, [enabled, driverId, bookingId]); // sendLocation/flushBatch are stable refs — intentionally omitted
+    }, [enabled, driverId, bookingId, sendLocation, flushBatch]);
 
     return state;
 }

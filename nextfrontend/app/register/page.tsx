@@ -11,13 +11,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
-    Tractor, Loader2, Eye, EyeOff, CheckCircle2, IndianRupee, MailCheck, Globe, Mail,
+    Tractor, Loader2, Eye, EyeOff, CheckCircle2, IndianRupee, MailCheck, Mail, AlertCircle, Smartphone,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { nodeApi } from '@/lib/api';
 import PincodeField, { PincodeResult } from '@/components/PincodeField';
+import { LanguageQuickBar, NeedHelpButton } from '@/components/AuthAssist';
+import { OtpInput, PhoneField, usePhoneOtp, isIndianMobile, OTP_LENGTH } from '@/components/PhoneOtp';
 
 type EmailStep = 'idle' | 'sending' | 'awaiting_otp' | 'verifying' | 'verified';
 
@@ -72,6 +74,35 @@ function PasswordStrengthBar({ password }: { password: string }) {
     );
 }
 
+/* ── Step progress ──────────────────────────────────────────────────────────── */
+/**
+ * This form is a single page, not a wizard, but it does move through three real
+ * phases: prove the email, fill in the details, done. Naming them tells a first-time
+ * user how much is left without restructuring a flow that already works.
+ */
+function StepProgress({ current }: { current: 1 | 2 | 3 }) {
+    const { t } = useLanguage();
+    const labels = [t('register.stepVerify'), t('register.stepDetails'), t('register.stepDone')];
+
+    return (
+        <div className="mb-6">
+            <p className="text-base font-bold text-gray-800 mb-2">
+                {t('register.stepOf', { current, total: 3 })} — {labels[current - 1]}
+            </p>
+            <div className="flex gap-2" aria-hidden="true">
+                {[1, 2, 3].map(i => (
+                    <div
+                        key={i}
+                        className={`h-2.5 flex-1 rounded-full transition-colors duration-300 ${
+                            i <= current ? 'bg-green-600' : 'bg-gray-200'
+                        }`}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+}
+
 /* ── Schema ─────────────────────────────────────────────────────────────────── */
 const passwordSchema = z.string()
     .min(8, 'Min 8 characters')
@@ -100,8 +131,8 @@ type RegisterForm = z.infer<typeof registerSchema>;
 function RegisterInner() {
     const router        = useRouter();
     const searchParams  = useSearchParams();
-    const { register: authRegister } = useAuth();
-    const { currentLanguage, t } = useLanguage();
+    const { register: authRegister, loginWithToken } = useAuth();
+    const { t } = useLanguage();
 
     const OWNER_PERKS  = [t('register.ownerPerk1'), t('register.ownerPerk2'), t('register.ownerPerk3'), t('register.ownerPerk4')];
     const FARMER_PERKS = [t('register.farmerPerk1'), t('register.farmerPerk2'), t('register.farmerPerk3'), t('register.farmerPerk4')];
@@ -110,6 +141,12 @@ function RegisterInner() {
     const [showConf,        setShowConf]       = useState(false);
     const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
     const [passwordValue,   setPasswordValue]  = useState('');
+
+    /* Which channel proves this person before the form unlocks. Either works; both reach the same account. */
+    const [verifyBy, setVerifyBy] = useState<'email' | 'phone'>('email');
+    const [signupToken, setSignupToken] = useState<string | null>(null);
+    const [otpValue, setOtpValue] = useState('');
+    const phoneOtp = usePhoneOtp('signup');
 
     /* Email OTP state */
     const [emailStep,     setEmailStep]    = useState<EmailStep>('idle');
@@ -156,13 +193,14 @@ function RegisterInner() {
         setEmailOtpError('');
         setEmailOtpValue('');
         try {
-            const res = await nodeApi.post<{ success: boolean; message?: string; devOtp?: string }>(
+            const res = await nodeApi.post<{ success: boolean; message?: string; devOtp?: string; devNote?: string }>(
                 '/auth/reg-email-send-otp', { email: emailVal }
             );
             setEmailStep('awaiting_otp');
             if (res?.devOtp) {
                 setEmailOtpValue(res.devOtp);
-                toast.info(`Dev OTP: ${res.devOtp}`);
+                toast.info(`Dev OTP: ${res.devOtp}`, { duration: 15000 });
+                if (res.devNote) toast.info(res.devNote, { duration: 10000 });
             } else {
                 toast.success(res?.message ?? `OTP sent to ${emailVal}`);
             }
@@ -195,14 +233,44 @@ function RegisterInner() {
         setValue('state',    result.state,   opts);
     };
 
+    /* Either channel unlocks the rest of the form. */
+    const verified = verifyBy === 'email' ? emailStep === 'verified' : !!signupToken;
+
+    /** Proves the number, then keeps the signup token that step 3 needs. */
+    const verifyPhone = async (code: string) => {
+        const phone = watch('phone');
+        const res = await phoneOtp.verify<{ signupToken: string }>(phone, code);
+        if (!res) { setOtpValue(''); return; }
+        setSignupToken(res.signupToken);
+    };
+
     /* ── Form submit ── */
     const onSubmit = async (data: RegisterForm) => {
-        if (emailStep !== 'verified') {
-            toast.error('Please verify your email first');
+        if (!verified) {
+            toast.error(verifyBy === 'email' ? 'Please verify your email first' : 'Please verify your mobile number first');
             return;
         }
         try {
             const { confirmPassword: _, ...payload } = data;
+
+            if (verifyBy === 'phone' && signupToken) {
+                // The number is already proved, so it travels in the token rather than the body.
+                const res = await nodeApi.post<{ token: string; user: { role: string } }>('/auth/phone/register', {
+                    signupToken,
+                    name: payload.name,
+                    email: payload.email,
+                    password: payload.password,
+                    role: payload.role,
+                    village: payload.village || undefined,
+                    district: payload.district || undefined,
+                    state: payload.state || undefined,
+                });
+                loginWithToken(res.token, res.user as never);
+                toast.success(t('auth.accountCreated'));
+                router.push(payload.role === 'owner' ? '/dashboard/owner' : '/dashboard/farmer');
+                return;
+            }
+
             await authRegister({
                 ...payload,
                 pincode:  payload.pincode  || undefined,
@@ -217,39 +285,50 @@ function RegisterInner() {
     };
 
     const fieldCls = (name: keyof RegisterForm) =>
-        `h-10 rounded-xl text-sm ${errors[name] ? 'border-red-400 focus-visible:ring-red-400' : 'border-gray-200'}`;
+        `h-12 rounded-xl text-base ${errors[name] ? 'border-red-500 focus-visible:ring-red-500' : 'border-gray-300'}`;
+
+    /** Small helper so every field reports its error the same way: icon + plain words. */
+    const FieldError = ({ name }: { name: keyof RegisterForm }) =>
+        errors[name] ? (
+            <p className="text-red-600 text-sm mt-1.5 flex items-center gap-1.5">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                {errors[name]?.message as string}
+            </p>
+        ) : null;
 
     /* ── Success screen ── */
     if (registeredEmail) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA] px-4">
-                <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8 max-w-md w-full text-center">
-                    <MailCheck className="w-14 h-14 text-green-500 mx-auto mb-4" />
-                    <h1 className="text-xl font-bold text-gray-900 mb-2">{t('auth.accountCreated')}</h1>
-                    <p className="text-gray-500 text-sm mb-6">
+            <div className="min-h-screen flex items-center justify-center bg-surface px-4 overflow-x-hidden">
+                <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 sm:p-8 max-w-md w-full text-center">
+                    <StepProgress current={3} />
+                    <MailCheck className="w-16 h-16 text-green-600 mx-auto mb-4" />
+                    <h1 className="text-2xl font-bold text-gray-900 mb-2">✅ {t('auth.accountCreated')}</h1>
+                    <p className="text-gray-700 text-base mb-6">
                         {t('auth.registerSuccess')}{' '}
-                        <strong className="text-gray-700">{registeredEmail}</strong>.
+                        <strong className="text-gray-900 break-words">{registeredEmail}</strong>.
                         {' '}{t('auth.verifyPhoneFirst')}.
                     </p>
-                    <p className="text-xs text-gray-400 mb-6">
+                    <p className="text-sm text-gray-600 mb-6">
                         {t('register.didntReceive')}{' '}
-                        <Link href="/verify-email" className="text-green-700 hover:underline font-semibold">
+                        <Link href="/verify-email" className="text-green-800 hover:underline font-semibold">
                             {t('register.requestNewLink')}
                         </Link>.
                     </p>
                     <Button
-                        className="w-full bg-green-700 hover:bg-green-800 font-bold rounded-xl"
+                        className="w-full h-14 bg-green-700 hover:bg-green-800 font-bold rounded-xl text-lg"
                         onClick={() => router.push('/login')}
                     >
                         {t('auth.goToLogin')}
                     </Button>
+                    <NeedHelpButton />
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen flex">
+        <div className="min-h-screen flex overflow-x-hidden">
 
             {/* ── Left panel ──────────────────────────────────────────── */}
             <div className="hidden lg:flex lg:w-[42%] bg-gradient-to-br from-green-950 via-green-900 to-green-800 flex-col justify-between p-12 relative overflow-hidden">
@@ -307,60 +386,55 @@ function RegisterInner() {
 
             {/* ── Right panel (form) ─────────────────────────────────── */}
             <div className="flex-1 overflow-y-auto bg-white">
-                <div className="min-h-full flex items-start justify-center px-5 py-10">
+                <div className="min-h-full flex items-start justify-center px-4 py-8 sm:px-5 sm:py-10">
                     <div className="w-full max-w-lg">
 
-                        {/* Mobile logo */}
-                        <div className="flex justify-center mb-7 lg:hidden">
-                            <Link href="/" className="flex items-center gap-2">
+                        {/* Mobile logo + tagline */}
+                        <div className="mb-6 lg:hidden">
+                            <Link href="/" className="flex items-center justify-center gap-2">
                                 <div className="bg-green-700 rounded-xl p-2.5">
-                                    <Tractor className="h-6 w-6 text-white" />
+                                    <Tractor className="h-7 w-7 text-white" />
                                 </div>
-                                <span className="text-2xl font-black text-green-700">FarmRent</span>
+                                <span className="text-3xl font-black text-green-700">FarmRent</span>
                             </Link>
                         </div>
 
-                        {/* Language selector */}
-                        <div className="flex justify-end mb-4">
-                            <Link href={`/select-language?next=/register`}
-                                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-green-700 transition-colors font-medium bg-gray-50 hover:bg-green-50 rounded-lg px-3 py-1.5 border border-gray-200 hover:border-green-300">
-                                <Globe className="h-3.5 w-3.5" />
-                                <span>{currentLanguage.name}</span>
-                            </Link>
-                        </div>
+                        <LanguageQuickBar next="/register" />
 
-                        <div className="mb-7">
+                        <div className="mb-6">
                             <h1 className="text-3xl font-black text-gray-900">{t('auth.createAccount')}</h1>
-                            <p className="text-gray-500 text-sm mt-1">{t('auth.createAccountSubtitle')}</p>
+                            <p className="text-gray-700 text-base mt-1">{t('auth.createAccountSubtitle')}</p>
                         </div>
+
+                        <StepProgress current={verified ? 2 : 1} />
 
                         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
 
                             {/* Role selector */}
                             <div>
-                                <Label className="mb-2 block text-sm font-semibold text-gray-700">{t('auth.iWantTo')}</Label>
+                                <Label className="mb-2 block text-base font-semibold text-gray-800">{t('auth.iWantTo')}</Label>
                                 <Controller
                                     name="role"
                                     control={control}
                                     render={({ field }) => (
-                                        <RadioGroup value={field.value} onValueChange={field.onChange} className="grid grid-cols-2 gap-3">
+                                        <RadioGroup value={field.value} onValueChange={field.onChange} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                             {(['farmer', 'owner'] as const).map(r => (
                                                 <label
                                                     key={r}
                                                     htmlFor={`role-${r}`}
-                                                    className={`flex items-center gap-3 border-2 rounded-xl p-3.5 cursor-pointer transition-all ${
+                                                    className={`flex min-h-[72px] items-center gap-3 border-2 rounded-xl p-4 cursor-pointer transition-all ${
                                                         field.value === r
                                                             ? 'border-green-600 bg-green-50 shadow-sm'
-                                                            : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                                                            : 'border-gray-300 hover:border-green-400 hover:bg-gray-50'
                                                     }`}
                                                 >
                                                     <RadioGroupItem value={r} id={`role-${r}`} className="sr-only" />
-                                                    <span className="text-xl">{r === 'farmer' ? '👨‍🌾' : '🚜'}</span>
+                                                    <span className="text-3xl" aria-hidden="true">{r === 'farmer' ? '👨‍🌾' : '🚜'}</span>
                                                     <div>
-                                                        <p className="font-bold text-gray-800 text-sm">
+                                                        <p className="font-bold text-gray-900 text-base">
                                                             {r === 'farmer' ? t('auth.rentEquipment') : t('auth.listEquipment')}
                                                         </p>
-                                                        <p className="text-[10px] text-gray-400">
+                                                        <p className="text-base text-gray-600">
                                                             {r === 'farmer' ? t('auth.rentMachinesDesc') : t('auth.ownMachinesDesc')}
                                                         </p>
                                                     </div>
@@ -371,11 +445,131 @@ function RegisterInner() {
                                 />
                             </div>
 
+                            {/* ── Prove who you are: email or mobile, whichever the person can use ── */}
+                            <div className="grid grid-cols-2 gap-2" role="tablist" aria-label={t('auth.iWantTo')}>
+                                <button
+                                    type="button" role="tab" suppressHydrationWarning
+                                    aria-selected={verifyBy === 'email'}
+                                    onClick={() => setVerifyBy('email')}
+                                    className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
+                                        verifyBy === 'email'
+                                            ? 'border-green-700 bg-green-700 text-white'
+                                            : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                                    }`}
+                                >
+                                    <Mail className="h-5 w-5" aria-hidden="true" />
+                                    {t('auth.verifyByEmail')}
+                                </button>
+                                <button
+                                    type="button" role="tab" suppressHydrationWarning
+                                    aria-selected={verifyBy === 'phone'}
+                                    onClick={() => setVerifyBy('phone')}
+                                    className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
+                                        verifyBy === 'phone'
+                                            ? 'border-green-700 bg-green-700 text-white'
+                                            : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                                    }`}
+                                >
+                                    <Smartphone className="h-5 w-5" aria-hidden="true" />
+                                    {t('auth.verifyByPhone')}
+                                </button>
+                            </div>
+
+                            {verifyBy === 'phone' && (
+                                <div className="border-2 border-dashed border-gray-200 rounded-2xl p-4 space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <Smartphone className="h-5 w-5 text-green-700" aria-hidden="true" />
+                                        <span className="text-base font-bold text-gray-800">{t('auth.verifyByPhone')}</span>
+                                        {signupToken && (
+                                            <span className="ml-auto flex items-center gap-1 text-sm font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                                                <CheckCircle2 className="h-4 w-4" /> {t('auth.phoneVerifiedBadge')}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <PhoneField
+                                        id="signup-phone"
+                                        value={watch('phone') ?? ''}
+                                        onChange={v => {
+                                            setValue('phone', v, { shouldDirty: true });
+                                            setSignupToken(null);
+                                            setOtpValue('');
+                                            phoneOtp.reset();
+                                        }}
+                                        disabled={!!signupToken || phoneOtp.sent}
+                                        invalid={!!watch('phone') && !isIndianMobile(watch('phone'))}
+                                    />
+
+                                    {!signupToken && phoneOtp.sent && (
+                                        <div className="space-y-2">
+                                            <OtpInput
+                                                value={otpValue}
+                                                onChange={setOtpValue}
+                                                onComplete={verifyPhone}
+                                                disabled={phoneOtp.verifying}
+                                                invalid={!!phoneOtp.error}
+                                                autoFocus
+                                            />
+                                            {phoneOtp.devOtp && (
+                                                <p className="text-amber-700 text-sm">Dev code: <strong>{phoneOtp.devOtp}</strong></p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {phoneOtp.error && (
+                                        <p className="text-red-600 text-sm flex items-center gap-1.5" role="alert">
+                                            <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                                            {phoneOtp.error}
+                                        </p>
+                                    )}
+
+                                    {!signupToken && (
+                                        <div className="flex flex-wrap gap-2">
+                                            {!phoneOtp.sent ? (
+                                                <Button
+                                                    type="button"
+                                                    onClick={() => phoneOtp.send(watch('phone'))}
+                                                    disabled={!isIndianMobile(watch('phone') ?? '') || phoneOtp.sending}
+                                                    className="h-12 px-5 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base disabled:opacity-60"
+                                                >
+                                                    {phoneOtp.sending && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
+                                                    {t('auth.sendOtp')}
+                                                </Button>
+                                            ) : (
+                                                <>
+                                                    <Button
+                                                        type="button"
+                                                        onClick={() => verifyPhone(otpValue)}
+                                                        disabled={otpValue.length !== OTP_LENGTH || phoneOtp.verifying}
+                                                        className="h-12 px-5 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base disabled:opacity-60"
+                                                    >
+                                                        {phoneOtp.verifying && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
+                                                        {t('auth.verify')}
+                                                    </Button>
+                                                    <button
+                                                        type="button"
+                                                        suppressHydrationWarning
+                                                        onClick={() => { setOtpValue(''); phoneOtp.send(watch('phone')); }}
+                                                        disabled={phoneOtp.secondsLeft > 0 || phoneOtp.sending}
+                                                        className="h-12 px-3 text-base font-semibold text-green-800 hover:underline disabled:text-gray-500 disabled:no-underline"
+                                                    >
+                                                        {phoneOtp.secondsLeft > 0
+                                                            ? t('auth.resendIn', { seconds: phoneOtp.secondsLeft })
+                                                            : t('auth.resendOtp')}
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {/* ── Email OTP verification ── */}
+                            {verifyBy === 'email' && (
                             <div className="border-2 border-dashed border-gray-200 rounded-2xl p-4 space-y-3">
                                 <div className="flex items-center gap-2">
                                     <Mail className="h-4 w-4 text-green-700" />
-                                    <span className="text-sm font-bold text-gray-700">Verify your email</span>
+                                    <span className="text-base font-bold text-gray-800">Verify your email</span>
                                     {emailStep === 'verified' && (
                                         <span className="ml-auto flex items-center gap-1 text-xs font-bold text-green-600 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
                                             <CheckCircle2 className="h-3 w-3" /> Verified
@@ -384,13 +578,15 @@ function RegisterInner() {
                                 </div>
 
                                 {emailStep === 'verified' ? (
-                                    <div className="flex items-center gap-2 h-10 px-3 rounded-xl border-2 border-green-400 bg-green-50">
-                                        <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
-                                        <span className="text-sm font-semibold text-green-700">{emailVal}</span>
+                                    <div className="flex items-center gap-2 min-h-[48px] px-3 rounded-xl border-2 border-green-400 bg-green-50">
+                                        <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                                        {/* min-w-0 + truncate, or a long address pushes "Change" off a 360px screen */}
+                                        <span className="text-base font-semibold text-green-800 min-w-0 truncate">{emailVal}</span>
                                         <button
                                             type="button"
+                                            suppressHydrationWarning
                                             onClick={() => { setEmailStep('idle'); setEmailOtpValue(''); setValue('email', '', { shouldDirty: true }); }}
-                                            className="ml-auto text-xs text-gray-400 hover:text-gray-600 underline"
+                                            className="ml-auto flex-shrink-0 text-base text-gray-600 hover:text-gray-900 underline"
                                         >
                                             Change
                                         </button>
@@ -406,22 +602,24 @@ function RegisterInner() {
                                                 onChange={e => { register('email').onChange(e); if (emailStep !== 'idle') { setEmailStep('idle'); setEmailOtpValue(''); } setEmailOtpError(''); setEmailTaken(false); }}
                                                 onBlur={e => { register('email').onBlur(e); const v = e.target.value; if (emailDebounceRef.current) clearTimeout(emailDebounceRef.current); emailDebounceRef.current = setTimeout(() => checkEmailAvailability(v), 300); }}
                                                 disabled={emailStep === 'sending' || emailStep === 'verifying'}
-                                                className={`flex-1 h-10 rounded-xl text-sm ${errors.email ? 'border-red-400' : 'border-gray-200'}`}
+                                                inputMode="email"
+                                                autoComplete="email"
+                                                className={`flex-1 min-w-0 h-12 rounded-xl text-base ${errors.email ? 'border-red-500' : 'border-gray-300'}`}
                                             />
                                             <Button
                                                 type="button"
                                                 onClick={handleSendEmailOTP}
                                                 disabled={emailStep === 'sending' || emailStep === 'verifying' || emailTaken}
-                                                className="h-10 px-4 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-sm whitespace-nowrap disabled:opacity-60"
+                                                className="h-12 px-4 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base whitespace-nowrap disabled:opacity-60"
                                             >
                                                 {emailStep === 'sending'
-                                                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                                                    ? <Loader2 className="h-5 w-5 animate-spin" />
                                                     : emailStep === 'awaiting_otp' ? 'Resend OTP' : 'Send OTP'}
                                             </Button>
                                         </div>
-                                        {errors.email && <p className="text-red-500 text-xs -mt-1">{errors.email.message}</p>}
+                                        <FieldError name="email" />
                                         {emailTaken && !errors.email && (
-                                            <p className="text-amber-600 text-xs -mt-1">
+                                            <p className="text-amber-700 text-sm -mt-1">
                                                 This email is already registered.{' '}
                                                 <Link href="/login" className="underline font-semibold">Sign in instead</Link>
                                             </p>
@@ -429,47 +627,49 @@ function RegisterInner() {
 
                                         {(emailStep === 'awaiting_otp' || emailStep === 'verifying') && (
                                             <div className="space-y-1.5 pt-1">
-                                                <p className="text-xs text-gray-500">OTP sent to <strong>{emailVal}</strong> — check your inbox</p>
+                                                <p className="text-base text-gray-700">OTP sent to <strong className="break-words">{emailVal}</strong> — check your inbox</p>
                                                 <div className="flex gap-2">
                                                     <input
                                                         type="text"
                                                         inputMode="numeric"
+                                                        autoComplete="one-time-code"
                                                         placeholder="Enter 6-digit OTP"
                                                         value={emailOtpValue}
                                                         onChange={e => { setEmailOtpValue(e.target.value.replace(/\D/g, '').slice(0, 6)); setEmailOtpError(''); }}
                                                         maxLength={6}
-                                                        className="flex-1 border border-gray-200 rounded-xl px-3 h-10 text-sm tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
+                                                        className="flex-1 min-w-0 border-2 border-gray-300 rounded-xl px-3 h-12 text-base tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
                                                         autoFocus
                                                     />
                                                     <Button
                                                         type="button"
                                                         onClick={handleVerifyEmailOTP}
                                                         disabled={emailOtpValue.length !== 6 || emailStep === 'verifying'}
-                                                        className="h-10 px-4 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-sm disabled:opacity-60"
+                                                        className="h-12 px-5 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base disabled:opacity-60"
                                                     >
-                                                        {emailStep === 'verifying' ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify'}
+                                                        {emailStep === 'verifying' ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Verify'}
                                                     </Button>
                                                 </div>
                                             </div>
                                         )}
-                                        {emailOtpError && <p className="text-red-500 text-xs">{emailOtpError}</p>}
+                                        {emailOtpError && <p className="text-red-600 text-sm">{emailOtpError}</p>}
                                     </>
                                 )}
                             </div>
+                            )}
 
-                            {/* ── Rest of form (locked until email verified) ── */}
-                            <div className={`space-y-3 transition-opacity duration-300 ${emailStep !== 'verified' ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+                            {/* ── Rest of form (locked until the person is proved, by either channel) ── */}
+                            <div className={`space-y-3 transition-opacity duration-300 ${!verified ? 'opacity-40 pointer-events-none select-none' : ''}`}>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div className="sm:col-span-2">
-                                        <Label htmlFor="name" className="mb-1.5 block text-xs font-semibold text-gray-600">{t('auth.name')} *</Label>
+                                        <Label htmlFor="name" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.name')} *</Label>
                                         <Input id="name" placeholder="Raju Reddy" {...register('name')} className={fieldCls('name')} />
-                                        {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name.message}</p>}
+                                        <FieldError name="name" />
                                     </div>
 
                                     <div className="sm:col-span-2">
-                                        <Label htmlFor="phone" className="mb-1.5 block text-xs font-semibold text-gray-600">{t('auth.phone')} *</Label>
+                                        <Label htmlFor="phone" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.phone')} *</Label>
                                         <div className={`flex items-center rounded-xl overflow-hidden border ${errors.phone ? 'border-red-400' : 'border-gray-200'} focus-within:ring-2 focus-within:ring-green-500`}>
-                                            <span className="px-3 text-sm text-gray-500 border-r border-gray-200 bg-gray-50 h-10 flex items-center select-none">+91</span>
+                                            <span className="px-3 text-base font-semibold text-gray-700 border-r border-gray-300 bg-gray-100 h-12 flex items-center select-none">+91</span>
                                             <input
                                                 type="tel"
                                                 inputMode="numeric"
@@ -478,10 +678,10 @@ function RegisterInner() {
                                                 {...register('phone')}
                                                 onChange={e => { setValue('phone', e.target.value.replace(/\D/g, '').slice(0, 10), { shouldDirty: true }); setPhoneTaken(false); }}
                                                 onBlur={e => { const v = e.target.value.replace(/\D/g, ''); if (phoneDebounceRef.current) clearTimeout(phoneDebounceRef.current); phoneDebounceRef.current = setTimeout(() => checkPhoneAvailability(v), 300); }}
-                                                className="flex-1 px-3 text-sm h-10 outline-none bg-transparent"
+                                                className="flex-1 min-w-0 px-3 text-base h-12 outline-none bg-transparent"
                                             />
                                         </div>
-                                        {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone.message}</p>}
+                                        <FieldError name="phone" />
                                         {phoneTaken && !errors.phone && (
                                             <p className="text-amber-600 text-xs mt-1">
                                                 This phone number is already linked to an account.{' '}
@@ -491,47 +691,47 @@ function RegisterInner() {
                                     </div>
 
                                     <div>
-                                        <PincodeField onResolved={handlePincodeResolved} className="h-10 rounded-xl text-sm border-gray-200" />
+                                        <PincodeField onResolved={handlePincodeResolved} />
                                     </div>
                                     <div>
-                                        <Label htmlFor="village" className="mb-1.5 block text-xs font-semibold text-gray-600">{t('auth.village')}</Label>
+                                        <Label htmlFor="village" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.village')}</Label>
                                         <Input id="village" placeholder={t('register.autoFilled')} {...register('village')} className={fieldCls('village')} />
                                     </div>
                                     <div>
-                                        <Label htmlFor="district" className="mb-1.5 block text-xs font-semibold text-gray-600">{t('auth.district')}</Label>
+                                        <Label htmlFor="district" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.district')}</Label>
                                         <Input id="district" placeholder={t('register.autoFilled')} {...register('district')} className={fieldCls('district')} />
                                     </div>
                                     <div>
-                                        <Label htmlFor="state" className="mb-1.5 block text-xs font-semibold text-gray-600">{t('auth.state')}</Label>
+                                        <Label htmlFor="state" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.state')}</Label>
                                         <Input id="state" placeholder={t('register.autoFilled')} {...register('state')} className={fieldCls('state')} />
                                     </div>
 
                                     <div>
-                                        <Label htmlFor="password" className="mb-1.5 block text-xs font-semibold text-gray-600">{t('auth.passwordLabel')} *</Label>
+                                        <Label htmlFor="password" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.passwordLabel')} *</Label>
                                         <div className="relative">
                                             <Input id="password" type={showPass ? 'text' : 'password'} placeholder={t('register.passwordPlaceholder')}
                                                 {...register('password', { onChange: e => setPasswordValue(e.target.value) })}
-                                                className={`${fieldCls('password')} pr-10`} />
-                                            <button type="button" suppressHydrationWarning onClick={() => setShowPass(v => !v)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                                {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                                className={`${fieldCls('password')} pr-14`} />
+                                            <button type="button" suppressHydrationWarning aria-label={showPass ? 'Hide password' : 'Show password'} onClick={() => setShowPass(v => !v)}
+                                                className="absolute right-0 top-0 h-12 w-12 flex items-center justify-center text-gray-500 hover:text-gray-800">
+                                                {showPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                             </button>
                                         </div>
                                         <PasswordStrengthBar password={passwordValue} />
-                                        {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password.message}</p>}
+                                        <FieldError name="password" />
                                     </div>
 
                                     <div>
-                                        <Label htmlFor="confirmPassword" className="mb-1.5 block text-xs font-semibold text-gray-600">{t('auth.confirmPassword')} *</Label>
+                                        <Label htmlFor="confirmPassword" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.confirmPassword')} *</Label>
                                         <div className="relative">
                                             <Input id="confirmPassword" type={showConf ? 'text' : 'password'} placeholder="Re-enter password"
-                                                {...register('confirmPassword')} className={`${fieldCls('confirmPassword')} pr-10`} />
-                                            <button type="button" suppressHydrationWarning onClick={() => setShowConf(v => !v)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                                {showConf ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                                {...register('confirmPassword')} className={`${fieldCls('confirmPassword')} pr-14`} />
+                                            <button type="button" suppressHydrationWarning aria-label={showConf ? 'Hide password' : 'Show password'} onClick={() => setShowConf(v => !v)}
+                                                className="absolute right-0 top-0 h-12 w-12 flex items-center justify-center text-gray-500 hover:text-gray-800">
+                                                {showConf ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                             </button>
                                         </div>
-                                        {errors.confirmPassword && <p className="text-red-500 text-xs mt-1">{errors.confirmPassword.message}</p>}
+                                        <FieldError name="confirmPassword" />
                                     </div>
                                 </div>
                             </div>
@@ -539,23 +739,25 @@ function RegisterInner() {
                             <Button
                                 type="submit"
                                 size="lg"
-                                className="w-full h-11 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-base disabled:opacity-60"
-                                disabled={isSubmitting || emailStep !== 'verified'}
+                                className="w-full h-14 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-lg disabled:opacity-60"
+                                disabled={isSubmitting || !verified}
                             >
                                 {isSubmitting
-                                    ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />{t('auth.creatingAccount')}</>
-                                    : emailStep !== 'verified'
-                                    ? 'Verify email to continue'
+                                    ? <><Loader2 className="h-5 w-5 animate-spin mr-2" />{t('auth.creatingAccount')}</>
+                                    : !verified
+                                    ? (verifyBy === 'email' ? 'Verify email to continue' : 'Verify your number to continue')
                                     : t(role === 'owner' ? 'auth.createOwnerAccount' : 'auth.createFarmerAccount')}
                             </Button>
                         </form>
 
-                        <p className="text-center text-sm text-gray-500 mt-5">
+                        <p className="text-center text-base text-gray-700 mt-5">
                             {t('auth.alreadyHaveAccount')}{' '}
-                            <Link href="/login" className="text-green-700 font-bold hover:underline">{t('auth.signIn')}</Link>
+                            <Link href="/login" className="text-green-800 font-bold hover:underline">{t('auth.signIn')}</Link>
                         </p>
 
-                        <p className="text-center text-xs text-gray-400 mt-3 leading-relaxed">
+                        <NeedHelpButton />
+
+                        <p className="text-center text-sm text-gray-600 mt-4 leading-relaxed">
                             {t('register.termsAgreement')}{' '}
                             <Link href="/" className="underline hover:text-gray-600">{t('register.termsOfService')}</Link>
                             {' '}{t('register.and')}{' '}

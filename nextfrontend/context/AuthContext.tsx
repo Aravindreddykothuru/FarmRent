@@ -5,7 +5,7 @@
  * Provides useAuth() hook to all client components.
  */
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import { nodeApi } from '@/lib/api';
+import { hasSessionHint, nodeApi } from '@/lib/api';
 
 interface User {
     id: string;
@@ -22,6 +22,8 @@ interface AuthContextType {
     loginWithToken: (token: string, user: User) => void;
     register: (data: RegisterData) => Promise<{ role: string }>;
     logout: () => Promise<void>;
+    switchRole: (newRole: 'farmer' | 'owner') => Promise<{ role: string }>;
+    updateUser: (updatedUser: Partial<User>) => void;
     isAuthenticated: boolean;
 }
 
@@ -56,18 +58,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        const savedToken = localStorage.getItem('authToken');
-        if (!savedToken) { setIsLoading(false); return; }
-        setToken(savedToken);
+        // Signed-out visitors carry no session cookie: skip the /auth/me round-trip and its 401.
+        if (!hasSessionHint()) {
+            setIsLoading(false);
+            return;
+        }
         nodeApi.get<{ success: boolean; user: User }>('/auth/me')
             .then((res) => {
                 setUser(res.user);
+                setToken('session-cookie');
                 writeAuthRoleCookie(res.user.role);
             })
             .catch(() => {
-                localStorage.removeItem('authToken');
                 clearAuthRoleCookie();
                 setToken(null);
+                setUser(null);
             })
             .finally(() => setIsLoading(false));
     }, []);
@@ -76,7 +81,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await nodeApi.post<{ success: boolean; token: string; user: User }>(
             '/auth/login', { email, password }
         );
-        localStorage.setItem('authToken', res.token);
         setToken(res.token);
         setUser(res.user);
         writeAuthRoleCookie(res.user.role);
@@ -84,7 +88,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const loginWithToken = (tok: string, u: User) => {
-        localStorage.setItem('authToken', tok);
         setToken(tok);
         setUser(u);
         writeAuthRoleCookie(u.role);
@@ -94,25 +97,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await nodeApi.post<{ success: boolean; token: string; user: User }>(
             '/auth/register', data
         );
-        localStorage.setItem('authToken', res.token);
         setToken(res.token);
         setUser(res.user);
         writeAuthRoleCookie(res.user.role);
         return { role: res.user.role };
     };
 
+    const updateUser = (updatedUser: Partial<User>) => {
+        setUser(prev => prev ? { ...prev, ...updatedUser } : null);
+        if (updatedUser.role) {
+            writeAuthRoleCookie(updatedUser.role);
+        }
+    };
+
+    const switchRole = async (newRole: 'farmer' | 'owner') => {
+        // Optimistic UI update — immediately update client state & authRole cookie
+        setUser(prev => prev ? { ...prev, role: newRole } : null);
+        writeAuthRoleCookie(newRole);
+
+        try {
+            const res = await nodeApi.patch<{ success: boolean; user: User }>(
+                '/users/profile',
+                { role: newRole }
+            );
+            if (res?.user) {
+                setUser(res.user);
+                writeAuthRoleCookie(res.user.role);
+                return { role: res.user.role };
+            }
+        } catch (err) {
+            console.warn('[switchRole] Backend profile update fallback (optimistic role active):', err);
+        }
+        return { role: newRole };
+    };
+
     const logout = async () => {
         try {
             await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' });
         } catch { /* best-effort — ignore network errors */ }
-        localStorage.removeItem('authToken');
         clearAuthRoleCookie();
         setToken(null);
         setUser(null);
     };
 
     return (
-        <AuthContext.Provider value={{ user, token, isLoading, login, loginWithToken, register, logout, isAuthenticated: !!user }}>
+        <AuthContext.Provider value={{
+            user,
+            token,
+            isLoading,
+            login,
+            loginWithToken,
+            register,
+            logout,
+            switchRole,
+            updateUser,
+            isAuthenticated: !!user
+        }}>
             {children}
         </AuthContext.Provider>
     );

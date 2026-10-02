@@ -191,7 +191,7 @@ export default function EquipmentDetailPage() {
     };
 
     if (loading) return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             <div className="bg-white border-b px-4 py-3">
                 <Skeleton className="h-5 w-32" />
             </div>
@@ -209,7 +209,7 @@ export default function EquipmentDetailPage() {
     );
 
     if (!machine) return (
-        <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-[#F7F8FA]">
+        <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-surface">
             <AlertCircle className="h-16 w-16 text-red-400" />
             <h2 className="text-2xl font-bold text-gray-700">{t('equipment.notFound')}</h2>
             <p className="text-gray-400">{t('equipment.notFoundDesc')}</p>
@@ -234,7 +234,7 @@ export default function EquipmentDetailPage() {
     const visibleReviews = showAllReviews ? reviews : reviews.slice(0, 3);
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA] pb-28 lg:pb-12">
+        <div className="min-h-screen bg-surface pb-28 lg:pb-12">
             {/* Breadcrumb */}
             <div className="bg-white border-b border-gray-100 shadow-sm">
                 <div className="container mx-auto px-4 lg:px-8 py-3 max-w-screen-xl flex items-center justify-between">

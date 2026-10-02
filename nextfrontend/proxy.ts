@@ -1,23 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-
-// Routes that require an active session
-const PROTECTED_PREFIXES = [
-    '/dashboard',
-    '/bookings',
-    '/book',
-    '/offers',
-    '/chats',
-    '/disputes',
-    '/wishlist',
-    '/add-equipment',
-    '/edit-equipment',
-    '/tracking',
-    '/payment',
-    '/driver',
-    '/profile',
-    '/ai-assistant',
-];
+import { isProtectedPath } from './lib/authRoutes';
 
 // Routes that logged-in users should not see
 const AUTH_ONLY_PAGES = [
@@ -31,10 +14,6 @@ const DEV_BYPASS = ['/dev/'];
 
 // Routes only accessible by admins
 const ADMIN_ONLY = ['/dashboard/admin'];
-
-function isProtected(pathname: string) {
-    return PROTECTED_PREFIXES.some(p => pathname === p || pathname.startsWith(p + '/'));
-}
 
 function isAuthOnly(pathname: string) {
     return AUTH_ONLY_PAGES.some(p => pathname === p || pathname.startsWith(p + '/'));
@@ -60,13 +39,16 @@ export function proxy(request: NextRequest) {
     // Always allow dev routes (email inbox, etc.)
     if (DEV_BYPASS.some(p => pathname.startsWith(p))) return NextResponse.next();
 
+    // Check authRole and secure token cookie presence (both must exist)
+    const token = request.cookies.get('token')?.value;
     const authRole = request.cookies.get('authRole')?.value?.trim();
-    const loggedIn = Boolean(authRole);
+    const loggedIn = Boolean(token && authRole);
 
     // Unauthenticated → protected route: send to login with return path
-    if (isProtected(pathname) && !loggedIn) {
+    if (isProtectedPath(pathname) && !loggedIn) {
         const url = request.nextUrl.clone();
         url.pathname = '/login';
+        url.search = '';
         url.searchParams.set('next', pathname);
         return NextResponse.redirect(url);
     }
@@ -92,6 +74,13 @@ export function proxy(request: NextRequest) {
 
 export const config = {
     matcher: [
-        '/((?!_next/static|_next/image|favicon\\.ico|api/).*)',
+        /*
+         * Match all request paths except for the ones starting with:
+         * - api (API routes)
+         * - _next/static (static files)
+         * - _next/image (image optimization files)
+         * - favicon.ico (favicon file)
+         */
+        '/((?!api|_next/static|_next/image|favicon\\.ico).*)',
     ],
 };

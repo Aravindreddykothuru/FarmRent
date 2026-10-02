@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
     SUPPORTED_LOCALES, DEFAULT_LOCALE, LOCALE_META, LANG_STORAGE_KEY, LANG_SELECTED_KEY,
     type Locale,
@@ -98,25 +98,31 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         loadMessages(lang).then(setMessages);
     }, [lang]);
 
-    const setLang = (code: LangCode) => {
+    const setLang = useCallback((code: LangCode) => {
         setLangState(code);
         localStorage.setItem(LANG_STORAGE_KEY, code);
-    };
+    }, []);
 
-    const markChosen = () => {
+    const markChosen = useCallback(() => {
         setHasChosen(true);
         localStorage.setItem(LANG_SELECTED_KEY, '1');
-    };
+    }, []);
 
-    const t: TFn = (key, vars = {}) => {
+    // Stable between renders (changes only when messages load), so pages can list `t` as an effect dependency.
+    const t: TFn = useCallback((key, vars = {}) => {
         const val = getNestedValue(messages, key) ?? getNestedValue(fallback, key) ?? key;
         return interpolate(val, vars);
-    };
+    }, [messages, fallback]);
 
     const currentLanguage = LANGUAGES.find(l => l.code === lang) ?? LANGUAGES[0];
 
+    const value = useMemo(
+        () => ({ lang, setLang, t, currentLanguage, hasChosen, markChosen }),
+        [lang, setLang, t, currentLanguage, hasChosen, markChosen],
+    );
+
     return (
-        <LanguageContext.Provider value={{ lang, setLang, t, currentLanguage, hasChosen, markChosen }}>
+        <LanguageContext.Provider value={value}>
             {children}
         </LanguageContext.Provider>
     );

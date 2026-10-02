@@ -8,7 +8,7 @@ import { useLanguage } from '@/context/LanguageContext';
 export default function NotFound() {
     const { t } = useLanguage();
     return (
-        <div className="min-h-[80vh] flex items-center justify-center bg-[#F7F8FA] px-4">
+        <div className="min-h-[80vh] flex items-center justify-center bg-surface px-4">
             <div className="text-center max-w-lg">
                 {/* Illustration */}
                 <div className="relative inline-block mb-6">
@@ -47,7 +47,6 @@ export default function NotFound() {
                             { href: '/login',        label: t('auth.signIn') },
                             { href: '/register',     label: t('nav.register') },
                             { href: '/how-it-works', label: t('nav.howItWorks') },
-                            { href: '/ai-assistant', label: t('nav.aiAssistant') },
                         ].map(l => (
                             <Link
                                 key={l.href}

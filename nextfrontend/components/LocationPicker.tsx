@@ -1,5 +1,5 @@
 'use client';
-/* eslint-disable @typescript-eslint/no-require-imports */
+ 
 
 import dynamic from 'next/dynamic';
 import { Crosshair, Loader2, MapPin, Search } from 'lucide-react';

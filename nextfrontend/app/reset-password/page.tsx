@@ -22,7 +22,7 @@ function passwordStrength(p: string): { score: number; label: string; color: str
 export default function ResetPasswordPage() {
     return (
         <Suspense fallback={
-            <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA]">
+            <div className="min-h-screen flex items-center justify-center bg-surface">
                 <Loader2 className="w-8 h-8 animate-spin text-green-700" />
             </div>
         }>
@@ -67,7 +67,7 @@ function ResetPasswordInner() {
     };
 
     if (!token) return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA] px-4">
+        <div className="min-h-screen flex items-center justify-center bg-surface px-4">
             <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8 max-w-md w-full text-center">
                 <p className="text-red-500 font-semibold mb-4">Invalid or missing reset token.</p>
                 <Link href="/forgot-password">
@@ -78,7 +78,7 @@ function ResetPasswordInner() {
     );
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F7F8FA] px-4">
+        <div className="min-h-screen flex items-center justify-center bg-surface px-4">
             <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8 max-w-md w-full">
 
                 <Link href="/login" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-6">

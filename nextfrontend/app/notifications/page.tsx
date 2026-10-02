@@ -81,7 +81,7 @@ export default function NotificationsPage() {
     const unreadCt  = notifs.filter(n => !n.isRead).length;
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
 
             {/* Header */}
             <div className="bg-white border-b sticky top-0 z-10">

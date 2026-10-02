@@ -73,7 +73,7 @@ export default function WalletPage() {
     }) ?? [];
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
 
             {/* Header */}
             <div className="bg-gradient-to-br from-green-900 via-green-800 to-emerald-700 text-white px-4 pt-6 pb-16">

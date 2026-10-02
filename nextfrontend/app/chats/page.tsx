@@ -7,10 +7,9 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { supabase } from '@/lib/supabase';
+import { connectNotifSocket } from '@/lib/socket';
 import { nodeApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -35,7 +34,7 @@ interface ChatRow {
 }
 
 export default function ChatsPage() {
-    const { user, isAuthenticated } = useAuth();
+    const { user, isAuthenticated, isLoading: authLoading } = useAuth();
     const { t } = useLanguage();
 
     function formatRelative(ts: string) {
@@ -71,23 +70,19 @@ export default function ChatsPage() {
     }, [isAuthenticated]);
 
     useEffect(() => {
-        if (!isAuthenticated) { router.push('/login'); return; }
+        // Wait for the session check: redirecting earlier bounces signed-in users off this page.
+        if (authLoading) return;
+        if (!isAuthenticated) { router.push('/login?next=/chats'); return; }
         load();
-    }, [isAuthenticated, load, router]);
+    }, [authLoading, isAuthenticated, load, router]);
 
-    /* ── Realtime unread badge updates ─────────────────────────────────── */
+    /* ── Realtime unread badge updates (authenticated /notifications socket) ── */
     useEffect(() => {
-        if (!supabase || !user?.id) return;
-        const sb = supabase;
-        const channel = sb
-            .channel(`inbox:${user.id}`)
-            .on(
-                'postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'messages' },
-                () => { load(); }
-            )
-            .subscribe();
-        return () => { sb.removeChannel(channel); };
+        if (!user?.id) return;
+        const socket = connectNotifSocket();
+        const onChatMessage = () => { load(); };
+        socket.on('chat:message', onChatMessage);
+        return () => { socket.off('chat:message', onChatMessage); };
     }, [user?.id, load]);
 
     const filtered = chats.filter(c =>
@@ -100,7 +95,7 @@ export default function ChatsPage() {
     const totalUnread = chats.reduce((sum, c) => sum + (c.unread_count || 0), 0);
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             {/* Header */}
             <div className="bg-white border-b border-gray-100 shadow-sm">
                 <div className="container mx-auto px-4 lg:px-8 py-5 max-w-3xl">

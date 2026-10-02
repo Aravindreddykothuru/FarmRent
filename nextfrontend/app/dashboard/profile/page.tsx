@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -27,7 +28,7 @@ const KYC_COLORS: Record<string, string> = {
 
 
 export default function ProfilePage() {
-    const { isAuthenticated, isLoading } = useAuth();
+    const { isAuthenticated, isLoading, switchRole } = useAuth();
     const { t } = useLanguage();
     const router = useRouter();
 
@@ -35,6 +36,22 @@ export default function ProfilePage() {
     const [name, setName]         = useState('');
     const [phone, setPhone]       = useState('');
     const [saving, setSaving]     = useState(false);
+    const [switchingRole, setSwitchingRole] = useState(false);
+
+    // Role switcher
+    const handleRoleSwitch = async (targetRole: 'farmer' | 'owner') => {
+        if (profile?.role === targetRole) return;
+        setSwitchingRole(true);
+        try {
+            await switchRole(targetRole);
+            setProfile(p => p ? { ...p, role: targetRole } : p);
+            toast.success(`Account mode switched to ${targetRole === 'owner' ? 'Owner' : 'Renter'}`);
+        } catch (err: unknown) {
+            toast.error(err instanceof Error ? err.message : 'Failed to switch account mode');
+        } finally {
+            setSwitchingRole(false);
+        }
+    };
 
     // Password change
     const [showPwd, setShowPwd]           = useState(false);
@@ -292,6 +309,72 @@ export default function ProfilePage() {
                     )}
                 </div>
 
+                {/* Account Role / Mode Switcher Card */}
+                <div className="bg-white rounded-2xl shadow-sm border p-6 space-y-4">
+                    <div>
+                        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <span>🔄</span> Account Mode & Role Switcher
+                        </h2>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Easily switch between renting farm machinery and listing your equipment to earn rental income.
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {/* Renter Card */}
+                        <div
+                            onClick={() => handleRoleSwitch('farmer')}
+                            className={`cursor-pointer rounded-xl border-2 p-4 transition-all ${
+                                profile.role === 'farmer'
+                                    ? 'border-green-600 bg-green-50/60 shadow-sm'
+                                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                            }`}
+                        >
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-2xl">🌾</span>
+                                {profile.role === 'farmer' && (
+                                    <span className="bg-green-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
+                                        Active
+                                    </span>
+                                )}
+                            </div>
+                            <h3 className="font-bold text-gray-900 text-sm">Renter</h3>
+                            <p className="text-xs text-gray-500 mt-1">
+                                Rent tractors, harvesters, and tools for your agricultural work.
+                            </p>
+                        </div>
+
+                        {/* Equipment Owner Card */}
+                        <div
+                            onClick={() => handleRoleSwitch('owner')}
+                            className={`cursor-pointer rounded-xl border-2 p-4 transition-all ${
+                                profile.role === 'owner'
+                                    ? 'border-green-600 bg-green-50/60 shadow-sm'
+                                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                            }`}
+                        >
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-2xl">🚜</span>
+                                {profile.role === 'owner' && (
+                                    <span className="bg-green-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
+                                        Active
+                                    </span>
+                                )}
+                            </div>
+                            <h3 className="font-bold text-gray-900 text-sm">Owner</h3>
+                            <p className="text-xs text-gray-500 mt-1">
+                                List your machinery, set daily/hourly rates, and earn rental revenue.
+                            </p>
+                        </div>
+                    </div>
+
+                    {switchingRole && (
+                        <p className="text-xs text-green-700 font-medium animate-pulse text-center">
+                            Switching account mode...
+                        </p>
+                    )}
+                </div>
+
                 {/* KYC section */}
                 <div className="bg-white rounded-2xl shadow-sm border p-6">
                     <h2 className="font-semibold text-gray-900 mb-1">{t('profile.kycStatus')}</h2>
@@ -304,7 +387,7 @@ export default function ProfilePage() {
                     {(profile.kyc_status === 'unverified' || profile.kyc_status === 'rejected' || !profile.kyc_status) && (
                         <p className="text-sm text-gray-500 mt-3">
                             {t('profile.kycGoTo')}{' '}
-                            <a href="/kyc" className="text-green-700 underline">{t('profile.kycDocuments')}</a>{' '}
+                            <Link href="/kyc" className="text-green-700 font-semibold underline">{t('profile.kycDocuments')}</Link>{' '}
                             {t('profile.kycUploadHint')}
                         </p>
                     )}

@@ -5,15 +5,22 @@ import { toast } from 'sonner';
 
 declare global {
   interface Window {
+     
     Razorpay?: any;
   }
 }
 
 type CreateOrderResponse = {
   orderId: string;
-  amount: number;
+  amount: number; // paise, computed by the server from the booking
   currency: string;
   keyId: string;
+};
+
+type RazorpaySuccess = {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
 };
 
 async function loadRazorpayScript(): Promise<void> {
@@ -30,53 +37,51 @@ async function loadRazorpayScript(): Promise<void> {
   });
 }
 
+/** POST to the payment API. The server requires an Idempotency-Key so a retried request cannot charge twice. */
+async function postPayment<T>(path: string, body: unknown, idempotencyKey: string): Promise<T> {
+  const res = await fetch(path, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(json?.error?.message || json?.message || 'Payment request failed. Please try again.');
+  }
+  // Unwrap the standard { success, data, error } envelope.
+  return (json && typeof json === 'object' && 'data' in json ? json.data : json) as T;
+}
+
 export function useRazorpay() {
   const [loading, setLoading] = useState(false);
 
   const startCheckout = useCallback(
     async (args: {
-      amountInInr: number;
+      bookingId: string;
       user: { full_name: string; email: string; phone: string };
-      receipt?: string;
-      notes?: Record<string, string>;
       onCancelled?: () => void;
       onSuccess?: (orderId: string) => void;
     }) => {
       setLoading(true);
       try {
-        const res = await fetch('/api/payment/create-order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            amount: args.amountInInr,
-            currency: 'INR',
-            receipt: args.receipt,
-            notes: args.notes,
-          }),
-        });
-        if (!res.ok) {
-          let msg = 'Payment setup failed. Please try again.';
-          try {
-            const j = (await res.json()) as { message?: string };
-            if (j?.message) msg = j.message;
-          } catch {
-            // ignore json parsing
-          }
-          throw new Error(msg);
-        }
-        const data = (await res.json()) as CreateOrderResponse;
+        // The amount is taken from the booking on the server; the client only identifies the booking.
+        const order = await postPayment<CreateOrderResponse>(
+          '/api/payment/create-order',
+          { bookingId: args.bookingId },
+          `order-${crypto.randomUUID()}`,
+        );
 
-        // ── Razorpay checkout flow ────────────────────────────────────────────
         await loadRazorpayScript();
-        if (!window.Razorpay) throw new Error('razorpay_not_loaded');
+        if (!window.Razorpay) throw new Error('Could not load the payment window. Check your connection and try again.');
 
         const options = {
-          key: data.keyId,
-          amount: data.amount,
-          currency: data.currency,
+          key: order.keyId,
+          amount: order.amount,
+          currency: order.currency,
           name: 'FarmRent',
           description: 'Equipment rental payment',
-          order_id: data.orderId,
+          order_id: order.orderId,
           prefill: {
             name: args.user.full_name,
             email: args.user.email,
@@ -91,21 +96,16 @@ export function useRazorpay() {
             emi: false,
             paylater: false,
           },
-          handler: async function (response: any) {
+          handler: async (response: RazorpaySuccess) => {
             try {
-              const vr = await fetch('/api/payment/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(response),
-              });
-              if (!vr.ok) throw new Error('verify_failed');
-              args.onSuccess?.(data.orderId);
-            } catch {
-              toast.error('Payment could not be confirmed. Contact support.');
+              await postPayment('/api/payment/verify', response, `verify-${response.razorpay_payment_id}`);
+              args.onSuccess?.(order.orderId);
+            } catch (e: unknown) {
+              toast.error(e instanceof Error ? e.message : 'Payment could not be confirmed. Contact support.');
             }
           },
           modal: {
-            ondismiss: function () {
+            ondismiss: () => {
               args.onCancelled?.();
             },
           },
@@ -114,8 +114,7 @@ export function useRazorpay() {
         const rz = new window.Razorpay(options);
         rz.open();
       } catch (e: unknown) {
-        const msg = e instanceof Error && e.message ? e.message : 'Payment setup failed. Please try again.';
-        toast.error(msg);
+        toast.error(e instanceof Error && e.message ? e.message : 'Payment setup failed. Please try again.');
       } finally {
         setLoading(false);
       }
@@ -125,4 +124,3 @@ export function useRazorpay() {
 
   return { startCheckout, loading };
 }
-

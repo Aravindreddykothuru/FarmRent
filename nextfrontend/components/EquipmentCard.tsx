@@ -1,6 +1,8 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Star, MapPin, IndianRupee, Clock, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import FavoriteButton from '@/components/FavoriteButton';
@@ -47,13 +49,18 @@ export default function EquipmentCard({ machine, isFavorited = false, variant = 
     const typeStr = machine.type?.replace(/-/g, ' ') ?? '';
     const available = !machine.status || machine.status === 'available';
 
+    const [imgSrc, setImgSrc] = useState(image);
+    useEffect(() => {
+        setImgSrc(image);
+    }, [image]);
+
     if (variant === 'list') {
         return (
             <Link href={`/equipment/${id}`} className={cn('block group', className)}>
                 <div className="flex gap-4 bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-green-200 transition-all duration-200">
                     <div className="relative h-28 w-40 flex-shrink-0 rounded-xl overflow-hidden bg-gray-100">
-                        <img src={image} alt={machine.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            onError={e => { (e.target as HTMLImageElement).src = FALLBACK; }} />
+                        <Image src={imgSrc} alt={machine.name} fill className="object-cover group-hover:scale-105 transition-transform duration-300"
+                            onError={() => setImgSrc(FALLBACK)} />
                         <FavoriteButton equipmentId={id} initialFavorited={isFavorited} size="sm" className="absolute top-2 right-2" onToggle={onFavoriteToggle} />
                         {!available && (
                             <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
@@ -110,17 +117,17 @@ export default function EquipmentCard({ machine, isFavorited = false, variant = 
     return (
         <Link href={`/equipment/${id}`} className={cn('block group', className)}>
             <div className={cn(
-                'bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer',
-                variant === 'featured' && 'rounded-3xl'
+                'stitch-card overflow-hidden cursor-pointer transition-all duration-300',
+                variant === 'featured' && 'rounded-3xl border-primary-container/30'
             )}>
                 {/* Image */}
-                <div className={cn('relative overflow-hidden bg-gray-100', variant === 'featured' ? 'h-52' : 'h-44')}>
-                    <img src={image} alt={machine.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        onError={e => { (e.target as HTMLImageElement).src = FALLBACK; }} />
+                <div className={cn('relative overflow-hidden bg-surface-container', variant === 'featured' ? 'h-52' : 'h-44')}>
+                    <Image src={imgSrc} alt={machine.name} fill
+                        className="object-cover group-hover:scale-105 transition-transform duration-500"
+                        onError={() => setImgSrc(FALLBACK)} />
 
                     {/* Overlay gradient */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
                     {/* Top badges */}
                     <div className="absolute top-3 left-3 right-3 flex items-start justify-between">

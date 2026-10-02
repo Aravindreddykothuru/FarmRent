@@ -17,6 +17,15 @@ venv/
 .next/
 dist/
 build/
+agronexus-springboot/target/
+
+# Test output
+coverage/
+test-results/
+playwright-report/
+
+# Local databases (SQLite files left by the removed Flask prototype)
+app.db
 
 # Logs
 *.log
@@ -30,3 +39,13 @@ Thumbs.db
 .idea/
 *.suo
 *.user
+
+# Superseded code and ad-hoc scripts kept locally for reference (not part of the app)
+_archive/
+# Local debugging scripts (some embed real local secrets) — never commit
+scratch/
+
+# Design mockups dropped in for reference — 157MB of node_modules between them, and not product code.
+# They stay on disk; the login page carries their visual language instead.
+/glassy login forms/
+/login page v2/

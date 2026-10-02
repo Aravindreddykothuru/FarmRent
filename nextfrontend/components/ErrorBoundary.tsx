@@ -3,6 +3,7 @@
 import { Component, type ReactNode } from 'react';
 import Link from 'next/link';
 import { AlertCircle, RefreshCw, Home } from 'lucide-react';
+import * as Sentry from '@sentry/nextjs';
 
 interface Props {
     children: ReactNode;
@@ -19,6 +20,10 @@ export class ErrorBoundary extends Component<Props, State> {
     constructor(props: Props) {
         super(props);
         this.state = { hasError: false };
+    }
+
+    componentDidCatch(error: Error, errorInfo: any) {
+        Sentry.captureException(error, { extra: errorInfo });
     }
 
     static getDerivedStateFromError(error: Error): State {

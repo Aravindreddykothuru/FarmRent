@@ -1,0 +1,28 @@
+{
+  "name": "farmers-platform",
+  "version": "2.0.0",
+  "private": true,
+  "description": "FarmRent Unified Platform",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup:env": "node scripts/setup-local-env.js",
+    "stack:up": "docker compose up -d --wait db rest gateway redis",
+    "stack:down": "docker compose down",
+    "install:all": "npm --prefix Backend_Node_legacy ci --legacy-peer-deps && npm --prefix nextfrontend ci --legacy-peer-deps",
+    "migrate": "npm --prefix Backend_Node_legacy run migrate",
+    "seed": "npm --prefix Backend_Node_legacy run seed",
+    "dev": "npm --prefix nextfrontend run dev",
+    "build": "npm --prefix nextfrontend run build",
+    "start": "npm --prefix nextfrontend start",
+    "lint": "npm --prefix Backend_Node_legacy run lint && npm --prefix nextfrontend run lint",
+    "typecheck": "cd nextfrontend && npx tsc --noEmit",
+    "test": "npm --prefix Backend_Node_legacy test",
+    "test:unit": "npm --prefix Backend_Node_legacy run test:unit",
+    "test:integration": "npm --prefix Backend_Node_legacy run test:integration",
+    "test:e2e": "cd Backend_Node_legacy && node scripts/e2e-acceptance.js --reset-rate-limits",
+    "test:ui": "npm --prefix nextfrontend run ui:smoke",
+    "test:backend": "npm --prefix Backend_Node_legacy test"
+  }
+}

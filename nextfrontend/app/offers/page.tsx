@@ -246,7 +246,7 @@ export default function OffersPage() {
     const pendingRecv = recvOffers.filter(o => o.status === 'pending').length;
 
     return (
-        <div className="min-h-screen bg-[#F7F8FA]">
+        <div className="min-h-screen bg-surface">
             {/* Header */}
             <div className="bg-white border-b border-gray-100 shadow-sm">
                 <div className="container mx-auto px-4 lg:px-8 py-5 max-w-screen-xl">

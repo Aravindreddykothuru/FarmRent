@@ -62,6 +62,7 @@ export default function DriverDashboard() {
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [error,         setError]         = useState<string | null>(null);
     const [lastAction,    setLastAction]    = useState<string | null>(null);
+    const [completionCode, setCompletionCode] = useState('');
 
     const gpsEnabled = isOnline && shareLocation;
 
@@ -77,17 +78,17 @@ export default function DriverDashboard() {
     // ── Load driver profile ───────────────────────────────────────────────────
     const loadProfile = useCallback(async () => {
         try {
-            const r = await nodeApi.get<{ success: boolean; data: DriverProfile }>('/drivers/me');
-            setDriver(r.data);
-            setIsOnline(r.data.is_available);
-            setShareLocation(r.data.location_sharing ?? true);
-        } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : 'Failed to load profile';
-            if (msg.includes('404') || msg.includes('not found')) {
+            // The API client unwraps the envelope: this is the profile itself, or null for non-drivers.
+            const profile = await nodeApi.get<DriverProfile | null>('/drivers/me');
+            if (!profile) {
                 setError('Driver profile not found. Please register as a driver first.');
-            } else {
-                setError(msg);
+                return;
             }
+            setDriver(profile);
+            setIsOnline(profile.is_available);
+            setShareLocation(profile.location_sharing ?? true);
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : 'Failed to load profile');
         } finally {
             setLoading(false);
         }
@@ -99,7 +100,8 @@ export default function DriverDashboard() {
             const r = await nodeApi.get<{ bookings: ActiveBooking[] }>('/bookings/driver');
             const all = r.bookings ?? [];
             setBookings(all);
-            const active = all.find(b => ['accepted', 'in_progress'].includes(b.status));
+            // Client statuses: confirmed = ready to hand over, in_progress = trip under way.
+            const active = all.find(b => ['confirmed', 'in_progress'].includes(b.status));
             setActiveBooking(active ?? null);
             setTripStarted(active?.status === 'in_progress');
         } catch { /* non-critical poll */ }
@@ -167,11 +169,17 @@ export default function DriverDashboard() {
     // ── End Trip ──────────────────────────────────────────────────────────────
     const endTrip = useCallback(async () => {
         if (!activeBooking) return;
+        // The rental only closes with the code shown on the renter's booking page.
+        if (!/^\d{6}$/.test(completionCode)) {
+            setError("Enter the 6-digit completion code shown on the renter's booking page.");
+            return;
+        }
         setActionLoading('trip_end');
         try {
-            await nodeApi.post('/drivers/trip/end', { booking_id: activeBooking.id });
+            await nodeApi.post('/drivers/trip/end', { booking_id: activeBooking.id, otp: completionCode });
             setTripStarted(false);
             setActiveBooking(null);
+            setCompletionCode('');
             setLastAction('Trip completed! ✅');
             await loadBookings();
         } catch (e: unknown) {
@@ -179,7 +187,7 @@ export default function DriverDashboard() {
         } finally {
             setActionLoading(null);
         }
-    }, [activeBooking, loadBookings]);
+    }, [activeBooking, completionCode, loadBookings]);
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -398,6 +406,16 @@ export default function DriverDashboard() {
                                 </button>
                             ) : (
                                 <>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        aria-label="Renter's completion code"
+                                        placeholder="Renter's 6-digit code"
+                                        value={completionCode}
+                                        maxLength={6}
+                                        onChange={e => setCompletionCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                        className="col-span-2 bg-slate-800 border border-slate-600 text-white text-center font-mono text-lg tracking-widest rounded-xl py-3 focus:outline-none focus:border-green-500"
+                                    />
                                     <div className="flex items-center justify-center gap-2 bg-green-800/40 text-green-400 font-medium py-3 rounded-xl text-sm">
                                         <Navigation className="w-4 h-4 animate-pulse" />
                                         In Progress
@@ -406,7 +424,7 @@ export default function DriverDashboard() {
                                         type="button"
                                         suppressHydrationWarning
                                         onClick={endTrip}
-                                        disabled={!!actionLoading}
+                                        disabled={!!actionLoading || completionCode.length !== 6}
                                         className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors"
                                     >
                                         {actionLoading === 'trip_end'

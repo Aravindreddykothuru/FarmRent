@@ -19,6 +19,7 @@ import DriverInfoCard   from '@/components/DriverInfoCard';
 import TrackingMap      from '@/components/TrackingMap';
 import { useBookingSocket } from '@/hooks/useBookingSocket';
 import { nodeApi } from '@/lib/api';
+import { toast } from 'sonner';
 import { ArrowLeft, AlertCircle, MapPin, RotateCcw } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -157,7 +158,8 @@ export default function LiveTrackingPage() {
         try {
             await nodeApi.patch(`/bookings/${bookingId}/cancel`, {});
             setBooking(prev => prev ? { ...prev, status: 'cancelled' } : prev);
-        } catch {
+        } catch (e: unknown) {
+            toast.error(e instanceof Error && e.message ? e.message : 'Could not cancel the booking');
         } finally {
             setCancelling(false);
         }
@@ -231,7 +233,7 @@ export default function LiveTrackingPage() {
                 {booking.status === 'completed' && (
                     <button
                         type="button"
-                        onClick={() => router.push(`/tracking/${bookingId}/history`)}
+                        onClick={() => router.push(`/dashboard/bookings/${bookingId}/location-history`)}
                         aria-label="Replay trip history"
                         className="pointer-events-auto p-2.5 bg-white rounded-full shadow-lg hover:bg-gray-50 transition-colors"
                     >

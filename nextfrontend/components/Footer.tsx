@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Tractor, MapPin, Phone, Mail, ArrowRight } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
+import { SUPPORT_PHONE_DISPLAY, SUPPORT_PHONE_E164, SUPPORT_EMAIL, SUPPORT_LOCATION } from '@/lib/contact';
 
 const STATES = ['Telangana', 'Andhra Pradesh', 'Maharashtra', 'Karnataka', 'Tamil Nadu', 'Punjab', 'Haryana', 'Uttar Pradesh'];
 
@@ -13,7 +14,6 @@ export default function Footer() {
     const LINKS = {
         [t('footer.explore')]: [
             { href: '/browse',             label: t('footer.browseEquipment') },
-            { href: '/ai-assistant',       label: t('footer.aiAssistant') },
             { href: '/how-it-works',       label: t('footer.howItWorks') },
             { href: '/browse?sort=rating', label: t('footer.topRated') },
         ],
@@ -32,17 +32,17 @@ export default function Footer() {
     };
 
     return (
-        <footer className="bg-gray-950 text-gray-300">
+        <footer className="bg-inverse-surface text-gray-300">
             {/* ── Top CTA strip ─────────────────────────────────────────── */}
-            <div className="bg-green-700">
+            <div className="bg-primary">
                 <div className="container mx-auto px-4 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-4">
                     <div>
                         <p className="font-black text-white text-lg">{t('footer.cta')}</p>
-                        <p className="text-green-200 text-sm">{t('footer.ctaSub')}</p>
+                        <p className="text-on-primary-container text-sm">{t('footer.ctaSub')}</p>
                     </div>
                     <Link
                         href="/register"
-                        className="flex items-center gap-2 bg-white text-green-700 font-bold px-5 py-2.5 rounded-xl text-sm hover:bg-green-50 transition-colors flex-shrink-0"
+                        className="flex items-center gap-2 bg-white text-primary font-bold px-5 py-2.5 rounded-xl text-sm hover:bg-surface-container transition-colors flex-shrink-0"
                     >
                         {t('footer.getStarted')} <ArrowRight className="h-4 w-4" />
                     </Link>
@@ -69,15 +69,15 @@ export default function Footer() {
                         <div className="space-y-2 text-sm">
                             <div className="flex items-center gap-2 text-gray-400">
                                 <MapPin className="h-4 w-4 text-green-500 flex-shrink-0" />
-                                <span>Hyderabad, Telangana, India</span>
+                                <span>{SUPPORT_LOCATION}</span>
                             </div>
                             <div className="flex items-center gap-2 text-gray-400">
                                 <Phone className="h-4 w-4 text-green-500 flex-shrink-0" />
-                                <span>+91 98765 43210</span>
+                                <a href={`tel:${SUPPORT_PHONE_E164}`} className="hover:text-green-400">{SUPPORT_PHONE_DISPLAY}</a>
                             </div>
                             <div className="flex items-center gap-2 text-gray-400">
                                 <Mail className="h-4 w-4 text-green-500 flex-shrink-0" />
-                                <span>support@farmrent.in</span>
+                                <a href={`mailto:${SUPPORT_EMAIL}`} className="hover:text-green-400">{SUPPORT_EMAIL}</a>
                             </div>
                         </div>
                     </div>

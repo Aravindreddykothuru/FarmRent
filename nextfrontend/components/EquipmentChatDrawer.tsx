@@ -3,11 +3,11 @@
 /**
  * EquipmentChatDrawer — OLX-style real-time chat panel.
  * Opens as a right-side drawer from the equipment detail page.
- * Uses Supabase Realtime for instant message delivery.
+ * New messages arrive over the authenticated /notifications socket.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { connectNotifSocket } from '@/lib/socket';
 import { nodeApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -59,7 +59,6 @@ export default function EquipmentChatDrawer({ equipmentId, equipmentName, equipm
     const [loading, setLoading]     = useState(true);
     const [error, setError]         = useState<string | null>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
-    const channelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
 
     const scrollToBottom = useCallback(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -91,36 +90,26 @@ export default function EquipmentChatDrawer({ equipmentId, equipmentName, equipm
         })();
 
         return () => { cancelled = true; };
-    }, [equipmentId, owner.id, token, user]);
+    }, [equipmentId, owner.id, token, user, t]);
 
-    /* ── Supabase Realtime subscription ─────────────────────────────��─── */
+    /* ── Real-time delivery (authenticated /notifications socket) ───────── */
     useEffect(() => {
-        if (!chatId || !supabase) return;
-        const sb = supabase;
+        if (!chatId) return;
 
         /* Mark messages as read */
         nodeApi.patch(`/messages/chat/${chatId}/read`, {}).catch(() => {});
 
-        const channel = sb
-            .channel(`chat:${chatId}`)
-            .on(
-                'postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
-                (payload) => {
-                    const msg = payload.new as Message;
-                    setMessages(prev => {
-                        if (prev.some(m => m.id === msg.id)) return prev;
-                        return [...prev, msg];
-                    });
-                    if (msg.sender_id !== user?.id) {
-                        nodeApi.patch(`/messages/chat/${chatId}/read`, {}).catch(() => {});
-                    }
-                }
-            )
-            .subscribe();
-
-        channelRef.current = channel;
-        return () => { sb.removeChannel(channel); };
+        const socket = connectNotifSocket();
+        const onChatMessage = (payload: { chat_id?: string; message?: Message }) => {
+            if (payload?.chat_id !== chatId || !payload.message) return;
+            const msg = payload.message;
+            setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+            if (msg.sender_id !== user?.id) {
+                nodeApi.patch(`/messages/chat/${chatId}/read`, {}).catch(() => {});
+            }
+        };
+        socket.on('chat:message', onChatMessage);
+        return () => { socket.off('chat:message', onChatMessage); };
     }, [chatId, user?.id]);
 
     /* ── Scroll on new message ─────────────────────────────────────────── */
