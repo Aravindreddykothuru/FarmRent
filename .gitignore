@@ -44,3 +44,8 @@ Thumbs.db
 _archive/
 # Local debugging scripts (some embed real local secrets) — never commit
 scratch/
+
+# Design mockups dropped in for reference — 157MB of node_modules between them, and not product code.
+# They stay on disk; the login page carries their visual language instead.
+/glassy login forms/
+/login page v2/

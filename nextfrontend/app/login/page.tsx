@@ -77,73 +77,66 @@ function LoginForm() {
     };
 
     return (
-        <div className="min-h-screen flex overflow-x-hidden">
+        /*
+         * Split hero and frosted glass card, after the "glassy" Form 2 mock.
+         *
+         * Two deliberate departures from that mock. The backdrop is a CSS gradient rather than the 1.1MB
+         * photograph it shipped with, because this screen is reached over rural 3G. And every control keeps
+         * the 48px / 16px floor the rest of the auth flow uses, which the mock's 13–14px text did not.
+         */
+        <div className="relative min-h-screen overflow-x-hidden bg-gradient-to-br from-green-950 via-green-900 to-emerald-900">
 
-            {/* ── Left panel (hidden on mobile) ─────────────────────── */}
-            <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-green-950 via-green-900 to-green-800 flex-col justify-between p-12 relative overflow-hidden">
-                {/* Background blobs */}
-                <div className="absolute top-0 right-0 w-80 h-80 bg-yellow-400/10 rounded-full blur-3xl -translate-y-1/3 translate-x-1/3 pointer-events-none" />
-                <div className="absolute bottom-0 left-0 w-64 h-64 bg-green-400/10 rounded-full blur-2xl pointer-events-none" />
+            {/* Depth, at no download cost */}
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+                <div className="absolute -top-32 -right-24 h-[28rem] w-[28rem] rounded-full bg-yellow-400/10 blur-3xl" />
+                <div className="absolute top-1/3 -left-32 h-[26rem] w-[26rem] rounded-full bg-emerald-400/10 blur-3xl" />
+                <div className="absolute -bottom-40 right-1/4 h-[22rem] w-[22rem] rounded-full bg-lime-300/10 blur-3xl" />
+                <div className="absolute left-8 top-16 hidden h-56 w-56 rounded-full border-4 border-white/10 lg:block" />
+                <div className="absolute bottom-24 left-1/3 hidden h-32 w-32 rounded-full border-4 border-white/10 lg:block" />
+            </div>
 
-                {/* Logo */}
-                <Link href="/" className="flex items-center gap-2.5 relative z-10">
-                    <div className="bg-white/10 backdrop-blur rounded-xl p-2.5">
-                        <Tractor className="h-6 w-6 text-white" />
-                    </div>
-                    <span className="text-2xl font-black text-white">FarmRent</span>
-                </Link>
+            <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col items-center gap-10 px-4 py-10 lg:flex-row lg:justify-between lg:gap-16 lg:px-12">
 
-                {/* Body */}
-                <div className="relative z-10">
-                    <div className="inline-flex items-center gap-2 bg-yellow-400/20 text-yellow-300 text-xs font-bold px-3 py-1.5 rounded-full mb-5">
-                        🇮🇳 {t('auth.indiaTopMarket')}
-                    </div>
-                    <h2 className="text-4xl font-black text-white leading-tight mb-3">
-                        {t('auth.rentSmarter')}<br />
-                        <span className="text-yellow-400">{t('auth.farmBetter')}</span>
-                    </h2>
-                    <p className="text-green-200 text-base leading-relaxed mb-8">
-                        {t('auth.signInAccess')}
+                {/* ── Hero ─────────────────────────────────────────────── */}
+                <div className="w-full max-w-xl text-center lg:text-left">
+                    <Link href="/" className="inline-flex items-center gap-2.5">
+                        <div className="rounded-xl bg-white/10 p-2.5 backdrop-blur">
+                            <Tractor className="h-7 w-7 text-white" />
+                        </div>
+                        <span className="text-3xl font-black text-white">FarmRent</span>
+                    </Link>
+
+                    <h1 className="mt-6 text-5xl font-black leading-[1.05] text-white sm:text-6xl lg:text-7xl">
+                        {t('auth.welcomeBack')}
+                    </h1>
+                    <p className="mt-4 text-lg text-green-100/90 lg:text-xl">
+                        {t('auth.signInSubtitle')}
                     </p>
 
-                    {/* Feature list */}
-                    <ul className="space-y-3">
+                    {/* The feature list is desktop-only: on a phone it would push the form below the fold. */}
+                    <ul className="mt-8 hidden space-y-3 lg:block">
                         {FEATURES.map(f => (
                             <li key={f.text} className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
-                                    <f.icon className="h-4 w-4 text-green-300" />
+                                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-white/10 backdrop-blur">
+                                    <f.icon className="h-5 w-5 text-green-200" />
                                 </div>
-                                <span className="text-green-100 text-sm">{f.text}</span>
+                                <span className="text-base text-green-100">{f.text}</span>
                             </li>
                         ))}
                     </ul>
                 </div>
 
-            </div>
-
-            {/* ── Right panel (form) ─────────────────────────────────── */}
-            <div className="flex-1 flex items-center justify-center px-4 py-8 sm:px-5 sm:py-10 bg-white">
-                <div className="w-full max-w-md">
-
-                    {/* Mobile logo + tagline */}
-                    <div className="mb-6 lg:hidden">
-                        <Link href="/" className="flex items-center justify-center gap-2">
-                            <div className="bg-green-700 rounded-xl p-2.5">
-                                <Tractor className="h-7 w-7 text-white" />
-                            </div>
-                            <span className="text-3xl font-black text-green-700">FarmRent</span>
-                        </Link>
-                        <p className="mt-2 text-center text-base text-gray-700">{t('auth.signInSubtitle')}</p>
-                    </div>
-
-                    {/* Language — kept near the top, since a farmer who cannot read this page
+                {/* ── Glass card ───────────────────────────────────────── */}
+                <div
+                    className="w-full max-w-md rounded-3xl border border-white/15 bg-green-950/40 p-5 backdrop-blur-2xl backdrop-saturate-150 sm:p-7"
+                    style={{
+                        boxShadow:
+                            '0 35px 70px rgba(0,0,0,0.45), inset 0 1.5px 2px rgba(255,255,255,0.22), inset 0 -1px 2px rgba(0,0,0,0.3)',
+                    }}
+                >
+                    {/* Language — kept at the top, since a farmer who cannot read this page
                         needs to switch before anything else on it makes sense. */}
-                    <LanguageQuickBar next="/login" />
-
-                    <div className="mb-6">
-                        <h1 className="text-3xl font-black text-gray-900">{t('auth.welcomeBack')}</h1>
-                        <p className="hidden lg:block text-gray-600 mt-1 text-base">{t('auth.signInSubtitle')}</p>
-                    </div>
+                    <LanguageQuickBar next="/login" tone="dark" />
 
                     {/* Two ways in, shown side by side rather than one hidden behind a link. */}
                     <div className="grid grid-cols-2 gap-2 mb-6" role="tablist" aria-label={t('auth.signIn')}>
@@ -153,8 +146,8 @@ function LoginForm() {
                             onClick={() => setMode('password')}
                             className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
                                 mode === 'password'
-                                    ? 'border-green-700 bg-green-700 text-white'
-                                    : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                                    ? 'border-green-400 bg-green-600 text-white shadow-lg shadow-green-900/50'
+                                    : 'border-white/20 bg-white/5 text-green-50 hover:border-green-300 hover:bg-white/10'
                             }`}
                         >
                             <KeyRound className="h-5 w-5" aria-hidden="true" />
@@ -166,8 +159,8 @@ function LoginForm() {
                             onClick={() => setMode('otp')}
                             className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
                                 mode === 'otp'
-                                    ? 'border-green-700 bg-green-700 text-white'
-                                    : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                                    ? 'border-green-400 bg-green-600 text-white shadow-lg shadow-green-900/50'
+                                    : 'border-white/20 bg-white/5 text-green-50 hover:border-green-300 hover:bg-white/10'
                             }`}
                         >
                             <Smartphone className="h-5 w-5" aria-hidden="true" />
@@ -178,8 +171,8 @@ function LoginForm() {
                     {mode === 'otp' ? (
                         <div className="space-y-5">
                             <div>
-                                <Label htmlFor="otp-phone" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-gray-800">
-                                    <Smartphone className="h-5 w-5 text-green-700" aria-hidden="true" />
+                                <Label htmlFor="otp-phone" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-green-50">
+                                    <Smartphone className="h-5 w-5 text-green-300" aria-hidden="true" />
                                     {t('auth.phone')}
                                 </Label>
                                 <PhoneField
@@ -188,9 +181,10 @@ function LoginForm() {
                                     onChange={v => { setPhone(v); otpFlow.reset(); setOtp(''); }}
                                     disabled={otpFlow.sent}
                                     invalid={phone.length > 0 && !isIndianMobile(phone)}
+                                    tone="dark"
                                 />
                                 {phone.length > 0 && !isIndianMobile(phone) && (
-                                    <p className="text-red-600 text-sm mt-1.5 flex items-center gap-1.5">
+                                    <p className="mt-1.5 flex items-center gap-1.5 text-sm text-red-300">
                                         <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                                         {t('auth.enterTenDigits')}
                                     </p>
@@ -199,7 +193,7 @@ function LoginForm() {
 
                             {otpFlow.sent && (
                                 <div>
-                                    <Label className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.enterOtp')}</Label>
+                                    <Label className="mb-1.5 block text-base font-semibold text-green-50">{t('auth.enterOtp')}</Label>
                                     <OtpInput
                                         value={otp}
                                         onChange={setOtp}
@@ -207,15 +201,16 @@ function LoginForm() {
                                         disabled={otpFlow.verifying}
                                         invalid={!!otpFlow.error}
                                         autoFocus
+                                        tone="dark"
                                     />
                                     {otpFlow.devOtp && (
-                                        <p className="text-amber-700 text-sm mt-2">Dev code: <strong>{otpFlow.devOtp}</strong></p>
+                                        <p className="mt-2 text-sm text-yellow-300">Dev code: <strong>{otpFlow.devOtp}</strong></p>
                                     )}
                                 </div>
                             )}
 
                             {otpFlow.error && (
-                                <p className="text-red-600 text-sm flex items-center gap-1.5" role="alert">
+                                <p className="flex items-center gap-1.5 text-sm text-red-300" role="alert">
                                     <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                                     {otpFlow.error}
                                 </p>
@@ -226,7 +221,7 @@ function LoginForm() {
                                     type="button"
                                     onClick={() => otpFlow.send(phone)}
                                     disabled={!isIndianMobile(phone) || otpFlow.sending}
-                                    className="w-full h-14 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-lg disabled:opacity-60"
+                                    className="h-14 w-full rounded-xl bg-gradient-to-r from-green-600 via-green-500 to-emerald-500 text-lg font-bold text-white shadow-lg shadow-green-900/50 transition-all hover:brightness-110 hover:shadow-xl disabled:opacity-50"
                                 >
                                     {otpFlow.sending && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
                                     {t('auth.sendOtp')}
@@ -237,7 +232,7 @@ function LoginForm() {
                                         type="button"
                                         onClick={() => submitOtp(otp)}
                                         disabled={otp.length !== OTP_LENGTH || otpFlow.verifying}
-                                        className="w-full h-14 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-lg disabled:opacity-60"
+                                        className="h-14 w-full rounded-xl bg-gradient-to-r from-green-600 via-green-500 to-emerald-500 text-lg font-bold text-white shadow-lg shadow-green-900/50 transition-all hover:brightness-110 hover:shadow-xl disabled:opacity-50"
                                     >
                                         {otpFlow.verifying && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
                                         {t('auth.verify')}
@@ -247,7 +242,7 @@ function LoginForm() {
                                         suppressHydrationWarning
                                         onClick={() => { setOtp(''); otpFlow.send(phone); }}
                                         disabled={otpFlow.secondsLeft > 0 || otpFlow.sending}
-                                        className="w-full h-11 text-base font-semibold text-green-800 hover:underline disabled:text-gray-500 disabled:no-underline"
+                                        className="h-11 w-full text-base font-semibold text-green-200 hover:text-white hover:underline disabled:text-green-100/40 disabled:no-underline"
                                     >
                                         {otpFlow.secondsLeft > 0
                                             ? t('auth.resendIn', { seconds: otpFlow.secondsLeft })
@@ -259,8 +254,8 @@ function LoginForm() {
                     ) : (
                     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                         <div>
-                            <Label htmlFor="email" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-gray-800">
-                                <Mail className="h-5 w-5 text-green-700" aria-hidden="true" />
+                            <Label htmlFor="email" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-green-50">
+                                <Mail className="h-5 w-5 text-green-300" aria-hidden="true" />
                                 {t('auth.email')}
                             </Label>
                             <Input
@@ -271,10 +266,10 @@ function LoginForm() {
                                 placeholder="you@example.com"
                                 aria-invalid={!!errors.email}
                                 {...register('email')}
-                                className={`h-12 rounded-xl text-base ${errors.email ? 'border-red-500 focus-visible:ring-red-500' : 'border-gray-300'}`}
+                                className={`h-12 rounded-xl border-white/20 bg-white/10 text-base text-white placeholder:text-green-100/50 focus-visible:ring-green-300 ${errors.email ? 'border-red-400' : ''}`}
                             />
                             {errors.email && (
-                                <p className="text-red-600 text-sm mt-1.5 flex items-center gap-1.5">
+                                <p className="mt-1.5 flex items-center gap-1.5 text-sm text-red-300">
                                     <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                                     {errors.email.message}
                                 </p>
@@ -282,8 +277,8 @@ function LoginForm() {
                         </div>
 
                         <div>
-                            <Label htmlFor="password" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-gray-800">
-                                <Lock className="h-5 w-5 text-green-700" aria-hidden="true" />
+                            <Label htmlFor="password" className="mb-1.5 flex items-center gap-2 text-base font-semibold text-green-50">
+                                <Lock className="h-5 w-5 text-green-300" aria-hidden="true" />
                                 {t('auth.password')}
                             </Label>
                             <div className="relative">
@@ -294,27 +289,27 @@ function LoginForm() {
                                     placeholder="Your password"
                                     aria-invalid={!!errors.password}
                                     {...register('password')}
-                                    className={`h-12 rounded-xl text-base pr-14 ${errors.password ? 'border-red-500 focus-visible:ring-red-500' : 'border-gray-300'}`}
+                                    className={`h-12 rounded-xl border-white/20 bg-white/10 pr-14 text-base text-white placeholder:text-green-100/50 focus-visible:ring-green-300 ${errors.password ? 'border-red-400' : ''}`}
                                 />
                                 <button
                                     type="button"
                                     suppressHydrationWarning
                                     aria-label={showPass ? 'Hide password' : 'Show password'}
                                     onClick={() => setShowPass(v => !v)}
-                                    className="absolute right-0 top-0 h-12 w-12 flex items-center justify-center text-gray-500 hover:text-gray-800 transition-colors"
+                                    className="absolute right-0 top-0 flex h-12 w-12 items-center justify-center text-green-100/70 transition-colors hover:text-white"
                                 >
                                     {showPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                 </button>
                             </div>
                             {errors.password && (
-                                <p className="text-red-600 text-sm mt-1.5 flex items-center gap-1.5">
+                                <p className="mt-1.5 flex items-center gap-1.5 text-sm text-red-300">
                                     <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                                     {errors.password.message}
                                 </p>
                             )}
                             <Link
                                 href="/forgot-password"
-                                className="mt-2 inline-flex h-11 items-center text-base font-semibold text-green-800 hover:underline"
+                                className="mt-2 inline-flex h-11 items-center text-base font-semibold text-green-200 hover:text-white hover:underline"
                             >
                                 {t('auth.forgotPassword')}
                             </Link>
@@ -322,7 +317,7 @@ function LoginForm() {
 
                         <Button
                             type="submit"
-                            className="w-full h-14 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-lg"
+                            className="h-14 w-full rounded-xl bg-gradient-to-r from-green-600 via-green-500 to-emerald-500 text-lg font-bold text-white shadow-lg shadow-green-900/50 transition-all hover:brightness-110 hover:shadow-xl"
                             disabled={isSubmitting}
                         >
                             {isSubmitting
@@ -335,36 +330,36 @@ function LoginForm() {
                     {/* Divider */}
                     <div className="relative my-6">
                         <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-gray-100" />
+                            <div className="w-full border-t border-white/15" />
                         </div>
                         <div className="relative flex justify-center">
-                            <span className="bg-white px-3 text-base text-gray-600 font-semibold">{t('auth.noAccount')}</span>
+                            <span className="rounded-full bg-green-950/60 px-3 text-base font-semibold text-green-100 backdrop-blur">{t('auth.noAccount')}</span>
                         </div>
                     </div>
 
                     {/* Register links — one column on a phone, so each card stays thumb-sized */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <Link href="/register?role=farmer" className="block">
-                            <span className="flex min-h-[64px] w-full items-center gap-3 border-2 border-gray-300 hover:border-green-500 hover:bg-green-50 rounded-xl px-4 py-3 transition-all group">
+                            <span className="flex min-h-[64px] w-full items-center gap-3 border-2 border-white/20 bg-white/5 hover:border-green-300 hover:bg-white/10 rounded-xl px-4 py-3 transition-all group">
                                 <span className="text-3xl" aria-hidden="true">👨‍🌾</span>
                                 <span className="text-left">
-                                    <span className="block text-base font-bold text-gray-800 group-hover:text-green-800">{t('auth.rentEquipment')}</span>
-                                    <span className="block text-base text-gray-600">{t('auth.registerFarmer')}</span>
+                                    <span className="block text-base font-bold text-white">{t('auth.rentEquipment')}</span>
+                                    <span className="block text-base text-green-100/80">{t('auth.registerFarmer')}</span>
                                 </span>
                             </span>
                         </Link>
                         <Link href="/register?role=owner" className="block">
-                            <span className="flex min-h-[64px] w-full items-center gap-3 border-2 border-gray-300 hover:border-green-500 hover:bg-green-50 rounded-xl px-4 py-3 transition-all group">
+                            <span className="flex min-h-[64px] w-full items-center gap-3 border-2 border-white/20 bg-white/5 hover:border-green-300 hover:bg-white/10 rounded-xl px-4 py-3 transition-all group">
                                 <span className="text-3xl" aria-hidden="true">🚜</span>
                                 <span className="text-left">
-                                    <span className="block text-base font-bold text-gray-800 group-hover:text-green-800">{t('auth.listEquipment')}</span>
-                                    <span className="block text-base text-gray-600">{t('auth.registerOwner')}</span>
+                                    <span className="block text-base font-bold text-white">{t('auth.listEquipment')}</span>
+                                    <span className="block text-base text-green-100/80">{t('auth.registerOwner')}</span>
                                 </span>
                             </span>
                         </Link>
                     </div>
 
-                    <NeedHelpButton />
+                    <NeedHelpButton tone="dark" />
                 </div>
             </div>
         </div>
@@ -374,8 +369,8 @@ function LoginForm() {
 export default function LoginPage() {
     return (
         <Suspense fallback={
-            <div className="min-h-screen flex items-center justify-center bg-white">
-                <Loader2 className="h-8 w-8 animate-spin text-green-700" />
+            <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-green-950 via-green-900 to-emerald-900">
+                <Loader2 className="h-8 w-8 animate-spin text-green-200" />
             </div>
         }>
             <LoginForm />

@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nodeApi, ApiError } from '@/lib/api';
+import type { Tone } from '@/components/AuthAssist';
 
 export const OTP_LENGTH = 6;
 
@@ -24,6 +25,7 @@ export function OtpInput({
     disabled,
     invalid,
     autoFocus,
+    tone = 'light',
 }: {
     value: string;
     onChange: (next: string) => void;
@@ -31,7 +33,9 @@ export function OtpInput({
     disabled?: boolean;
     invalid?: boolean;
     autoFocus?: boolean;
+    tone?: Tone;
 }) {
+    const dark = tone === 'dark';
     const boxes = useRef<Array<HTMLInputElement | null>>([]);
 
     const setDigits = (next: string) => {
@@ -95,8 +99,9 @@ export function OtpInput({
                         boxes.current[Math.min(filled.length, OTP_LENGTH - 1)]?.focus();
                     }}
                     className={`h-14 w-full min-w-0 rounded-xl border-2 text-center text-2xl font-bold tabular-nums
-                        focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50
-                        ${invalid ? 'border-red-500' : 'border-gray-300'}`}
+                        focus:outline-none focus:ring-2 disabled:opacity-50
+                        ${dark ? 'bg-white/10 text-white focus:ring-green-300' : 'bg-white text-gray-900 focus:ring-green-500'}
+                        ${invalid ? 'border-red-400' : dark ? 'border-white/25' : 'border-gray-300'}`}
                 />
             ))}
         </div>
@@ -178,19 +183,27 @@ export function PhoneField({
     disabled,
     invalid,
     id = 'phone',
+    tone = 'light',
 }: {
     value: string;
     onChange: (next: string) => void;
     disabled?: boolean;
     invalid?: boolean;
     id?: string;
+    tone?: Tone;
 }) {
+    const dark = tone === 'dark';
     return (
         <div
-            className={`flex items-center rounded-xl overflow-hidden border-2 focus-within:ring-2 focus-within:ring-green-500
-                ${invalid ? 'border-red-500' : 'border-gray-300'}`}
+            className={`flex items-center overflow-hidden rounded-xl border-2 focus-within:ring-2
+                ${dark ? 'bg-white/10 focus-within:ring-green-300' : 'bg-white focus-within:ring-green-500'}
+                ${invalid ? 'border-red-400' : dark ? 'border-white/25' : 'border-gray-300'}`}
         >
-            <span className="px-3 text-base font-semibold text-gray-700 border-r border-gray-300 bg-gray-100 h-12 flex items-center select-none">
+            <span
+                className={`flex h-12 select-none items-center border-r px-3 text-base font-semibold ${
+                    dark ? 'border-white/20 bg-white/10 text-green-50' : 'border-gray-300 bg-gray-100 text-gray-700'
+                }`}
+            >
                 +91
             </span>
             <input
@@ -204,7 +217,9 @@ export function PhoneField({
                 disabled={disabled}
                 aria-invalid={!!invalid}
                 onChange={e => onChange(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                className="flex-1 min-w-0 px-3 text-base h-12 outline-none bg-transparent disabled:opacity-60"
+                className={`h-12 min-w-0 flex-1 bg-transparent px-3 text-base outline-none disabled:opacity-60 ${
+                    dark ? 'text-white placeholder:text-green-100/50' : 'text-gray-900'
+                }`}
             />
         </div>
     );

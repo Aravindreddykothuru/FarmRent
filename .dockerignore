@@ -33,3 +33,7 @@ agronexus-springboot
 GPS
 Nonfunctionalrequirements
 nginx
+
+# Design mockups kept locally for reference; 157MB that would otherwise enter every build context.
+glassy login forms
+login page v2
