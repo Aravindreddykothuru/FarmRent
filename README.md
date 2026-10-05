@@ -5,6 +5,8 @@
 
 > ### Live site — **<https://farmrentcom.in>**
 >
+> **Render host:** **<https://farmrent-l9gk.onrender.com>** · **API Health:** [`/health`](https://farmrentcom.in/health) · **API Docs:** [`/api-docs`](https://farmrentcom.in/api-docs)
+>
 > **Deploys from** [`.github/workflows/render-deploy.yml`](.github/workflows/render-deploy.yml) — every push to `audit/farmrent-refactor`
 > runs the whole test suite first and reaches Render only if it passes.
 > **Watch a release:** [Actions → Render Deploy](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/render-deploy.yml)
@@ -17,26 +19,35 @@ FarmRent connects farmers who need machinery (tractors, harvesters, sprayers, th
 ## Architecture
 
 ```
-Browser (Next.js pages, Socket.IO client)
-        │  one origin, one port (3000)
+Browser / PWA (Next.js 16 App Router, React 19, Socket.IO client)
+        │
+        │  One origin, one port (3000)
         ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Unified server — nextfrontend/server.js                     │
-│    /api/v1/*, /api/payment/*, /health, /metrics → Express    │
-│    /socket.io  (namespaces /tracking, /notifications)        │
-│    everything else → Next.js App Router                      │
-└───────────────┬──────────────────────────────┬───────────────┘
-                │ supabase-js (service role)   │
-                ▼                              ▼
-     PostgREST (Supabase, or the local        Redis
-     gateway on :54321) → Postgres + PostGIS  sessions, refresh tokens,
-     RLS on every table; only the API's       rate limits, caches, queues,
-     service role can read or write           Socket.IO adapter
+┌────────────────────────────────────────────────────────────────────────┐
+│  Unified Server — nextfrontend/server.js                               │
+│    ├── Express 4 API: /api/v1/*, /api/payment/*, /health, /metrics     │
+│    ├── Socket.IO 4: /tracking (GPS coordinates), /notifications (push) │
+│    └── Next.js 16 SSR & App Router: pages, layouts, server components  │
+└────────┬───────────────────────────┬──────────────────────────┬────────┘
+         │                           │                          │
+         ▼                           ▼                          ▼
+┌──────────────────┐       ┌──────────────────┐       ┌──────────────────┐
+│  PostgREST / DB  │       │  Redis 7 Cache   │       │ External APIs    │
+│  Supabase        │       │  Render KeyValue │       │                  │
+│  PostgreSQL 15   │       │  • Sessions      │       │  • 2Factor.in    │
+│  + PostGIS       │       │  • Refresh tokens│       │    (SMS OTP)     │
+│  • RLS on tables │       │  • Rate limits   │       │  • MSG91 / SMTP  │
+│  • GiST ranges   │       │  • BullMQ queues │       │    (Email queue) │
+│    prevent       │       │  • Socket.IO     │       │  • Razorpay      │
+│    double-book   │       │    adapter       │       │    (Payments)    │
+└──────────────────┘       └──────────────────┘       └──────────────────┘
 ```
 
-- **One process** serves pages, the REST API and websockets, so the browser never needs a separate API URL.
+- **One process**: Next.js App Router, Express REST API, and Socket.IO real-time servers run together in one process (`nextfrontend/server.js`) on port 3000. The browser never deals with cross-origin requests, port fragmentation, or disparate API hosts.
 - **Business rules live on the server**: prices are computed from the listing (the client's amounts are ignored), the rental state machine is enforced by conditional updates, and a Postgres exclusion constraint makes double-booking impossible even under concurrent requests.
 - **Auth**: short-lived JWT access token (15 min) in an httpOnly cookie, rotating refresh token stored hashed in Redis with reuse detection, server-side session list with remote sign-out.
+- **Real-time telemetry**: Socket.IO `/tracking` namespace for booking-scoped GPS coordinates and live breadcrumbs, and `/notifications` for push updates.
+- **Resilient messaging & fallbacks**: Phone OTP verification through 2Factor.in AUTOGEN (falling back to logged OTP in dev environments). Email transmission via dual-provider failover: MSG91 primary, Gmail SMTP secondary.
 
 ### Rental lifecycle
 
@@ -110,7 +121,7 @@ signing. The number is proved by OTP; the address is not, and the account does n
 | Payments | Razorpay (optional) + cash on delivery |
 | SMS OTP | 2Factor.in AUTOGEN (optional); falls back to the existing email/WhatsApp/SMS providers, and to a logged code outside production |
 | Languages | 10 — English, Hindi, Telugu, Tamil, Kannada, Marathi, Punjabi, Bengali, Gujarati, Malayalam (`nextfrontend/messages/`) |
-| Hosting | Render web service from `Dockerfile` (blueprint in `render.yaml`), Render Key Value for Redis, Supabase for Postgres |
+| Hosting | Render web service from `Dockerfile` (blueprint in `render.yaml`), Render Key Value for Redis, Supabase for Postgres (live at <https://farmrentcom.in> & <https://farmrent-l9gk.onrender.com>) |
 | Tests | Jest + Supertest (unit, integration, API contract), HTTP acceptance script, Playwright-driven browser smoke |
 | CI / CD | GitHub Actions — `ci.yml` (tests), `render-deploy.yml` (live site), `production-deploy.yml` (ECR/EKS image) |
 
@@ -213,24 +224,167 @@ Everything in containers, against the local stack:
 docker compose --profile app up --build
 ```
 
-### Deploying
+## Deployment (Render)
 
-The live site runs on **Render** at **<https://farmrentcom.in>**.
+The production stack is deployed on **Render** (migrated away from Railway), backed by **Render Key Value (Redis 7)** and **Supabase (PostgreSQL 15 + PostGIS)**.
 
-- **[`.github/workflows/render-deploy.yml`](.github/workflows/render-deploy.yml) is what ships it.** A push to
-  `audit/farmrent-refactor` runs the whole suite as a gate and calls the Render API only once it is green,
-  pinned to the commit CI just proved rather than to whatever the branch tip has become. A red suite never
-  reaches production, and every attempt leaves a run in
-  [Actions](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/render-deploy.yml) whether it
-  succeeded or not — which a browser-authorised Render connection does not. `workflow_dispatch` re-runs it
-  by hand.
-- **[`render.yaml`](render.yaml)** is the blueprint: one Docker web service and a Key Value (Redis) instance,
-  with Postgres coming from a Supabase project created outside Render. Values marked `sync: false` are entered
-  in the Render dashboard and never live in this repository.
-- Build the image from `Dockerfile`. Browser-visible settings (`NEXT_PUBLIC_*`) are build arguments; server secrets are runtime environment variables and never enter the image (`.dockerignore` excludes every `.env` file).
-- Required runtime variables: `JWT_SECRET`, `JWT_REFRESH_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `REDIS_URL`, `APP_URL`, `ALLOWED_ORIGINS` (your real domains only), `CLIENT_URL`. Set `TRUST_PROXY=1` behind a load balancer so rate limits see client IPs.
-- Apply database migrations deliberately before releasing code that needs them — back up first, then from `Backend_Node_legacy`: `DATABASE_URL=<production connection string> npm run migrate`. The runner records checksums in `schema_migrations`, takes an advisory lock and skips migrations that are already applied. The deploy workflow never migrates on its own.
-- `.github/workflows/production-deploy.yml` is a separate path, triggered by a push to `main`: it runs the full CI, builds and pushes the image to ECR and rolls out to EKS. It does not serve farmrentcom.in.
+### Live Host Links & Monitoring
+
+| Endpoint | URL | Notes |
+|---|---|---|
+| **Production Domain** | **<https://farmrentcom.in>** | Primary custom domain with SSL |
+| **Render Host URL** | **<https://farmrent-l9gk.onrender.com>** | Direct Render service domain (fallback & direct health check) |
+| **API Health Check** | <https://farmrentcom.in/health> | Liveness endpoint checked every 30s by Render |
+| **Deep Health Check** | <https://farmrentcom.in/health/full> | Diagnostic check verifying database and Redis connectivity |
+| **API Documentation** | <https://farmrentcom.in/api-docs> | Interactive Swagger / OpenAPI documentation |
+| **Release Monitor** | [Actions → Render Deploy](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/render-deploy.yml) | Gated CI/CD releases |
+
+---
+
+### Render Architecture Overview
+
+```
+                                  Render Cloud (Singapore)
+                     ┌──────────────────────────────────────────────────┐
+                     │                                                  │
+Internet / Users ───►│  Render Reverse Proxy (TLS / Edge)               │
+                     │         │                                        │
+                     │         │ TRUST_PROXY=1 (Preserves client IP)    │
+                     │         ▼                                        │
+                     │  Web Service: farmrent                           │
+                     │  (Docker runtime from root Dockerfile)           │
+                     │  Next.js 16 SSR + Express API + Socket.IO (:3000)│
+                     │         │                      │                 │
+                     │         ▼                      │                 │
+                     │  Key Value: farmrent-redis     │                 │
+                     │  (Redis 7, maxmemory noevict)  │                 │
+                     └────────────────────────────────┼─────────────────┘
+                                                      │ IPv4 Session Pooler (:5432)
+                                                      ▼
+                                         External Supabase Project
+                                         (PostgreSQL 15 + PostGIS)
+```
+
+1. **Web Service (`farmrent`)**:
+   - Containerized deployment built from the root `Dockerfile`.
+   - Single unified process on port 3000 running Next.js App Router, Express API (`/api/v1`), and Socket.IO real-time telemetry (`/tracking` and `/notifications`).
+   - Sits behind Render's reverse proxy with `TRUST_PROXY=1` enabled so per-IP rate limiters accurately identify clients rather than collapsing all users into Render's shared proxy IP.
+2. **Key Value Service (`farmrent-redis`)**:
+   - Managed Redis 7 instance provisioned within the same Render region (Singapore).
+   - Configured with `maxmemoryPolicy: noeviction` so the BullMQ email and notification queue is never dropped during memory pressure.
+   - Internal network access only (isolated from the public internet).
+3. **Database (Supabase PostgreSQL + PostGIS)**:
+   - Hosted on Supabase.
+   - **Important**: Render web services connect to the internet over IPv4. Because Supabase direct connections are IPv6-only, Render connects via Supabase's **IPv4 Session Pooler** connection string (`DATABASE_URL`, typically on port `5432` or `6543`).
+
+---
+
+### Deployment Methods
+
+#### Method 1: Infrastructure as Code with Render Blueprint (`render.yaml`) — *Recommended*
+
+FarmRent provides a production-grade Render Blueprint in [`render.yaml`](render.yaml).
+
+1. Go to your [Render Dashboard](https://dashboard.render.com).
+2. Click **New +** → **Blueprint**.
+3. Connect the repository: `Aravindreddykothuru/FarmRent` and branch `audit/farmrent-refactor`.
+4. Render automatically parses `render.yaml` and provisions:
+   - The `farmrent` Docker web service.
+   - The `farmrent-redis` Key Value database.
+   - Auto-generated cryptographic secrets (`JWT_SECRET`, `JWT_REFRESH_SECRET`).
+   - Wired internal Redis connection string (`REDIS_URL`).
+5. In the dashboard prompt, fill in the secrets marked `sync: false`:
+   - `SUPABASE_URL`: Your Supabase project URL (`https://<project-ref>.supabase.co`)
+   - `SUPABASE_SERVICE_KEY`: Supabase secret `service_role` key
+   - `DATABASE_URL`: Supabase IPv4 Session Pooler connection string (`postgresql://postgres.<project-ref>:[PASSWORD]@aws-0-[region].pooler.supabase.com:5432/postgres`)
+   - `TWOFACTOR_API_KEY`: 2Factor.in SMS API key (optional for SMS OTP)
+   - `MSG91_AUTH_KEY`: MSG91 authentication key (optional for email)
+   - `SMTP_PASS`: Gmail App password for SMTP fallback
+6. Click **Apply**. Render will build the Docker container and deploy the service.
+
+#### Method 2: Manual Setup via Render Dashboard
+
+If you prefer to configure the service manually:
+
+1. **Create the Redis Instance**:
+   - Dashboard → **New +** → **Key Value**.
+   - Name: `farmrent-redis`, Region: `Singapore`, Plan: `Free` or `Starter`.
+   - Copy the **Internal Connection String** (`REDIS_URL`).
+2. **Create the Web Service**:
+   - Dashboard → **New +** → **Web Service**.
+   - Connect repository `Aravindreddykothuru/FarmRent`.
+   - **Runtime**: `Docker`.
+   - **Dockerfile Path**: `./Dockerfile`.
+   - **Docker Build Context**: `.`.
+   - **Region**: `Singapore`.
+   - **Health Check Path**: `/health`.
+   - **Auto-Deploy**: Turn `No` if using GitHub Actions CI gate (see below), or `Yes` if deploying immediately on git push.
+3. **Add Environment Variables**: Add the variables from the table below.
+4. **Attach Custom Domain**:
+   - Go to Web Service Settings → **Custom Domains**.
+   - Add `farmrentcom.in` and `www.farmrentcom.in`.
+   - Add the CNAME / ALIAS DNS records provided by Render at your DNS registrar.
+
+---
+
+### CI/CD Deployment Pipeline (`render-deploy.yml`)
+
+Instead of deploying unvalidated code on every push, production releases are controlled by [`.github/workflows/render-deploy.yml`](.github/workflows/render-deploy.yml):
+
+- **Gated by Automated Tests**: Every push to `audit/farmrent-refactor` runs the entire test suite first (`ci.yml`: unit tests, integration tests, contract tests, ESLint, TypeScript check).
+- **Pinned Commit Trigger**: The deploy step invokes the Render Deploy API (`POST https://api.render.com/v1/services/$SERVICE_ID/deploys`) specifically pinned to the verified `$GITHUB_SHA`. If tests fail, Render never builds or releases the commit.
+- **Auditability**: Every deployment attempt leaves a visible record in GitHub Actions.
+- **Manual Deploys**: Re-deploy anytime using **Run workflow** (`workflow_dispatch`) in the Actions tab.
+
+> **GitHub Secrets Required for CI/CD**:
+> - `RENDER_API_KEY`: Render Account API key (Account Settings → API Keys).
+> - `RENDER_SERVICE_ID`: The service ID found in the Render web service URL (e.g. `srv-xxxxxx`).
+
+---
+
+### Database Migrations on Render / Supabase
+
+Database migrations are managed via `Backend_Node_legacy/db/migrate.js` and should be run before deploying code changes that require schema alterations:
+
+```bash
+# From Backend_Node_legacy directory:
+DATABASE_URL="postgresql://postgres.<project-ref>:[PASSWORD]@aws-0-[region].pooler.supabase.com:5432/postgres" npm run migrate
+```
+
+- The migration runner is strictly **idempotent**, acquires a PostgreSQL advisory lock, records SHA-256 checksums in `schema_migrations`, and skips already-applied migrations.
+- The Render build process does not run migrations automatically, ensuring production schema changes are reviewed and applied with backups.
+
+---
+
+### Render Environment Variables Reference
+
+| Variable | Required | Default / Value | Description |
+|---|---|---|---|
+| `NODE_ENV` | Yes | `production` | Enables production optimizations and disables demo endpoints |
+| `PORT` | Auto | `3000` | Port listened to by the unified server (managed by Render) |
+| `TRUST_PROXY` | **Yes** | `1` | Tells Express it is behind Render's reverse proxy so client IP rate limiting works |
+| `APP_URL` | Yes | `https://farmrentcom.in` | Public production URL (or `https://farmrent-l9gk.onrender.com`) |
+| `CLIENT_URL` | Yes | `https://farmrentcom.in` | Used for redirect links and transactional email URLs |
+| `NEXT_PUBLIC_APP_URL` | Yes | `https://farmrentcom.in` | Public URL baked into client-side links |
+| `ALLOWED_ORIGINS` | Yes | `https://farmrentcom.in,https://www.farmrentcom.in,https://farmrent-l9gk.onrender.com` | Allowed CORS origins for browser API calls |
+| `JWT_SECRET` | Yes | Auto-generated | 32+ character key for signing 15-minute access JWTs |
+| `JWT_REFRESH_SECRET`| Yes | Auto-generated | 32+ character key for signing refresh tokens |
+| `REDIS_URL` | Yes | From Key Value | Connection string for sessions, queues, rate limits, and Socket.IO |
+| `SUPABASE_URL` | Yes | `https://<ref>.supabase.co` | Supabase project REST API URL |
+| `SUPABASE_SERVICE_KEY`| Yes | `ey...` | Secret service role key (bypasses RLS for API operations) |
+| `DATABASE_URL` | Yes | `postgresql://...` | Supabase IPv4 Session Pooler connection string for migrations |
+| `TWOFACTOR_API_KEY` | Optional | Dashboard secret | 2Factor.in API key for SMS OTP authentication |
+| `TWOFACTOR_TEMPLATE`| Optional | `""` | DLT approved template name (or empty for 2Factor default) |
+| `EMAIL_PROVIDERS` | Optional | `msg91,smtp` | Comma-separated list of enabled email delivery backends |
+| `EMAIL_PROVIDER` | Optional | `smtp` | Primary email driver |
+| `SMTP_HOST` / `PORT`| Optional | `smtp.gmail.com` / `587` | SMTP relay server settings |
+| `SMTP_USER` / `PASS`| Optional | `farmrent862@gmail.com` | SMTP credentials |
+| `MSG91_AUTH_KEY` | Optional | Dashboard secret | MSG91 transactional email auth key |
+| `RAZORPAY_KEY_ID` | Optional | `rzp_live_*` | Razorpay gateway API key |
+| `RAZORPAY_KEY_SECRET`| Optional| Dashboard secret | Razorpay gateway secret |
+| `RAZORPAY_WEBHOOK_SECRET`| Prod | Dashboard secret | Verifies raw-body signatures for `/api/payment/webhook` |
+
+*(Note: Railway deployment has been decommissioned and removed; Render is the designated production hosting platform).*
 
 ---
 

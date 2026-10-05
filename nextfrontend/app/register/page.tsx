@@ -56,7 +56,7 @@ function PasswordStrengthBar({ password }: { password: string }) {
             <div className="flex gap-1 mb-1">
                 {[1, 2, 3, 4].map(i => (
                     <div key={i} className={`flex-1 h-1.5 rounded-full transition-all duration-300 ${
-                        i <= strength ? STRENGTH_COLORS[strength] : 'bg-gray-200'
+                        i <= strength ? STRENGTH_COLORS[strength] : 'bg-white/20'
                     }`} />
                 ))}
             </div>
@@ -86,7 +86,7 @@ function StepProgress({ current }: { current: 1 | 2 | 3 }) {
 
     return (
         <div className="mb-6">
-            <p className="text-base font-bold text-gray-800 mb-2">
+            <p className="mb-2 text-base font-bold text-green-50">
                 {t('register.stepOf', { current, total: 3 })} — {labels[current - 1]}
             </p>
             <div className="flex gap-2" aria-hidden="true">
@@ -94,7 +94,7 @@ function StepProgress({ current }: { current: 1 | 2 | 3 }) {
                     <div
                         key={i}
                         className={`h-2.5 flex-1 rounded-full transition-colors duration-300 ${
-                            i <= current ? 'bg-green-600' : 'bg-gray-200'
+                            i <= current ? 'bg-green-400' : 'bg-white/20'
                         }`}
                     />
                 ))}
@@ -285,12 +285,12 @@ function RegisterInner() {
     };
 
     const fieldCls = (name: keyof RegisterForm) =>
-        `h-12 rounded-xl text-base ${errors[name] ? 'border-red-500 focus-visible:ring-red-500' : 'border-gray-300'}`;
+        `h-12 rounded-xl border-white/20 bg-white/10 text-base text-white placeholder:text-green-100/50 focus-visible:ring-green-300 ${errors[name] ? 'border-red-400' : ''}`;
 
     /** Small helper so every field reports its error the same way: icon + plain words. */
     const FieldError = ({ name }: { name: keyof RegisterForm }) =>
         errors[name] ? (
-            <p className="text-red-600 text-sm mt-1.5 flex items-center gap-1.5">
+            <p className="mt-1.5 flex items-center gap-1.5 text-sm text-red-300">
                 <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                 {errors[name]?.message as string}
             </p>
@@ -299,29 +299,29 @@ function RegisterInner() {
     /* ── Success screen ── */
     if (registeredEmail) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-surface px-4 overflow-x-hidden">
-                <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 sm:p-8 max-w-md w-full text-center">
+            <div className="flex min-h-screen items-center justify-center overflow-x-hidden bg-gradient-to-br from-green-950 via-green-900 to-emerald-900 px-4">
+                <div className="w-full max-w-md rounded-3xl border border-white/15 bg-green-950/40 p-6 text-center backdrop-blur-2xl backdrop-saturate-150 sm:p-8" style={{ boxShadow: '0 35px 70px rgba(0,0,0,0.45), inset 0 1.5px 2px rgba(255,255,255,0.22)' }}>
                     <StepProgress current={3} />
-                    <MailCheck className="w-16 h-16 text-green-600 mx-auto mb-4" />
-                    <h1 className="text-2xl font-bold text-gray-900 mb-2">✅ {t('auth.accountCreated')}</h1>
-                    <p className="text-gray-700 text-base mb-6">
+                    <MailCheck className="mx-auto mb-4 h-16 w-16 text-green-300" />
+                    <h1 className="mb-2 text-2xl font-bold text-white">✅ {t('auth.accountCreated')}</h1>
+                    <p className="mb-6 text-base text-green-100/90">
                         {t('auth.registerSuccess')}{' '}
-                        <strong className="text-gray-900 break-words">{registeredEmail}</strong>.
+                        <strong className="break-words text-white">{registeredEmail}</strong>.
                         {' '}{t('auth.verifyPhoneFirst')}.
                     </p>
-                    <p className="text-sm text-gray-600 mb-6">
+                    <p className="mb-6 text-sm text-green-100/80">
                         {t('register.didntReceive')}{' '}
-                        <Link href="/verify-email" className="text-green-800 hover:underline font-semibold">
+                        <Link href="/verify-email" className="font-semibold text-green-200 hover:text-white hover:underline">
                             {t('register.requestNewLink')}
                         </Link>.
                     </p>
                     <Button
-                        className="w-full h-14 bg-green-700 hover:bg-green-800 font-bold rounded-xl text-lg"
+                        className="h-14 w-full rounded-xl bg-gradient-to-r from-green-600 via-green-500 to-emerald-500 text-lg font-bold text-white shadow-lg shadow-green-900/50 hover:brightness-110"
                         onClick={() => router.push('/login')}
                     >
                         {t('auth.goToLogin')}
                     </Button>
-                    <NeedHelpButton />
+                    <NeedHelpButton tone="dark" />
                 </div>
             </div>
         );
@@ -385,25 +385,48 @@ function RegisterInner() {
             </div>
 
             {/* ── Right panel (form) ─────────────────────────────────── */}
-            <div className="flex-1 overflow-y-auto bg-white">
-                <div className="min-h-full flex items-start justify-center px-4 py-8 sm:px-5 sm:py-10">
-                    <div className="w-full max-w-lg">
+            {/*
+             * The "login page v2" mock's signature is a gradient panel sweeping diagonally behind a dark
+             * card with a glowing edge. That is reproduced here in FarmRent green with a CSS transform
+             * rather than framer-motion: the sweep is decorative, and a new animation dependency is not
+             * worth the bytes on the phones this screen is opened on. It slides when the verification
+             * channel changes, so the motion tracks a real state change instead of running for show.
+             */}
+            <div className="relative flex-1 overflow-y-auto bg-gradient-to-br from-green-950 via-green-900 to-emerald-900">
+                <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute -top-[10%] h-[120%] w-[250%] bg-gradient-to-br from-green-700/40 to-emerald-500/20 transition-transform duration-700 ease-in-out motion-reduce:transition-none"
+                    style={{ transform: `skewX(20deg) translateX(${verifyBy === 'email' ? '10%' : '-70%'})` }}
+                />
+                <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+                    <div className="absolute -top-24 right-0 h-96 w-96 rounded-full bg-yellow-400/10 blur-3xl" />
+                    <div className="absolute bottom-0 left-0 h-80 w-80 rounded-full bg-emerald-400/10 blur-3xl" />
+                </div>
+
+                <div className="relative z-10 min-h-full flex items-start justify-center px-4 py-8 sm:px-5 sm:py-10">
+                    <div
+                        className="w-full max-w-lg rounded-3xl border border-white/15 bg-green-950/40 p-5 backdrop-blur-2xl backdrop-saturate-150 sm:p-7"
+                        style={{
+                            boxShadow:
+                                '0 35px 70px rgba(0,0,0,0.45), inset 0 1.5px 2px rgba(255,255,255,0.22), inset 0 -1px 2px rgba(0,0,0,0.3)',
+                        }}
+                    >
 
                         {/* Mobile logo + tagline */}
                         <div className="mb-6 lg:hidden">
                             <Link href="/" className="flex items-center justify-center gap-2">
-                                <div className="bg-green-700 rounded-xl p-2.5">
+                                <div className="rounded-xl bg-white/10 p-2.5 backdrop-blur">
                                     <Tractor className="h-7 w-7 text-white" />
                                 </div>
-                                <span className="text-3xl font-black text-green-700">FarmRent</span>
+                                <span className="text-3xl font-black text-white">FarmRent</span>
                             </Link>
                         </div>
 
-                        <LanguageQuickBar next="/register" />
+                        <LanguageQuickBar next="/register" tone="dark" />
 
                         <div className="mb-6">
-                            <h1 className="text-3xl font-black text-gray-900">{t('auth.createAccount')}</h1>
-                            <p className="text-gray-700 text-base mt-1">{t('auth.createAccountSubtitle')}</p>
+                            <h1 className="text-3xl font-black text-white">{t('auth.createAccount')}</h1>
+                            <p className="mt-1 text-base text-green-100/90">{t('auth.createAccountSubtitle')}</p>
                         </div>
 
                         <StepProgress current={verified ? 2 : 1} />
@@ -412,7 +435,7 @@ function RegisterInner() {
 
                             {/* Role selector */}
                             <div>
-                                <Label className="mb-2 block text-base font-semibold text-gray-800">{t('auth.iWantTo')}</Label>
+                                <Label className="mb-2 block text-base font-semibold text-green-50">{t('auth.iWantTo')}</Label>
                                 <Controller
                                     name="role"
                                     control={control}
@@ -424,17 +447,17 @@ function RegisterInner() {
                                                     htmlFor={`role-${r}`}
                                                     className={`flex min-h-[72px] items-center gap-3 border-2 rounded-xl p-4 cursor-pointer transition-all ${
                                                         field.value === r
-                                                            ? 'border-green-600 bg-green-50 shadow-sm'
-                                                            : 'border-gray-300 hover:border-green-400 hover:bg-gray-50'
+                                                            ? 'border-green-400 bg-green-600/20 shadow-sm'
+                                                            : 'border-white/20 bg-white/5 hover:border-green-300 hover:bg-white/10'
                                                     }`}
                                                 >
                                                     <RadioGroupItem value={r} id={`role-${r}`} className="sr-only" />
                                                     <span className="text-3xl" aria-hidden="true">{r === 'farmer' ? '👨‍🌾' : '🚜'}</span>
                                                     <div>
-                                                        <p className="font-bold text-gray-900 text-base">
+                                                        <p className="text-base font-bold text-white">
                                                             {r === 'farmer' ? t('auth.rentEquipment') : t('auth.listEquipment')}
                                                         </p>
-                                                        <p className="text-base text-gray-600">
+                                                        <p className="text-base text-green-100/80">
                                                             {r === 'farmer' ? t('auth.rentMachinesDesc') : t('auth.ownMachinesDesc')}
                                                         </p>
                                                     </div>
@@ -453,8 +476,8 @@ function RegisterInner() {
                                     onClick={() => setVerifyBy('email')}
                                     className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
                                         verifyBy === 'email'
-                                            ? 'border-green-700 bg-green-700 text-white'
-                                            : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                                            ? 'border-green-400 bg-green-600 text-white shadow-lg shadow-green-900/50'
+                                            : 'border-white/20 bg-white/5 text-green-50 hover:border-green-300 hover:bg-white/10'
                                     }`}
                                 >
                                     <Mail className="h-5 w-5" aria-hidden="true" />
@@ -466,8 +489,8 @@ function RegisterInner() {
                                     onClick={() => setVerifyBy('phone')}
                                     className={`flex h-12 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors ${
                                         verifyBy === 'phone'
-                                            ? 'border-green-700 bg-green-700 text-white'
-                                            : 'border-gray-300 bg-white text-gray-800 hover:border-green-500'
+                                            ? 'border-green-400 bg-green-600 text-white shadow-lg shadow-green-900/50'
+                                            : 'border-white/20 bg-white/5 text-green-50 hover:border-green-300 hover:bg-white/10'
                                     }`}
                                 >
                                     <Smartphone className="h-5 w-5" aria-hidden="true" />
@@ -476,10 +499,10 @@ function RegisterInner() {
                             </div>
 
                             {verifyBy === 'phone' && (
-                                <div className="border-2 border-dashed border-gray-200 rounded-2xl p-4 space-y-3">
+                                <div className="space-y-3 rounded-2xl border-2 border-dashed border-white/20 bg-white/5 p-4">
                                     <div className="flex items-center gap-2">
-                                        <Smartphone className="h-5 w-5 text-green-700" aria-hidden="true" />
-                                        <span className="text-base font-bold text-gray-800">{t('auth.verifyByPhone')}</span>
+                                        <Smartphone className="h-5 w-5 text-green-300" aria-hidden="true" />
+                                        <span className="text-base font-bold text-white">{t('auth.verifyByPhone')}</span>
                                         {signupToken && (
                                             <span className="ml-auto flex items-center gap-1 text-sm font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
                                                 <CheckCircle2 className="h-4 w-4" /> {t('auth.phoneVerifiedBadge')}
@@ -498,6 +521,7 @@ function RegisterInner() {
                                         }}
                                         disabled={!!signupToken || phoneOtp.sent}
                                         invalid={!!watch('phone') && !isIndianMobile(watch('phone'))}
+                                        tone="dark"
                                     />
 
                                     {!signupToken && phoneOtp.sent && (
@@ -509,9 +533,10 @@ function RegisterInner() {
                                                 disabled={phoneOtp.verifying}
                                                 invalid={!!phoneOtp.error}
                                                 autoFocus
+                                                tone="dark"
                                             />
                                             {phoneOtp.devOtp && (
-                                                <p className="text-amber-700 text-sm">Dev code: <strong>{phoneOtp.devOtp}</strong></p>
+                                                <p className="text-sm text-yellow-300">Dev code: <strong>{phoneOtp.devOtp}</strong></p>
                                             )}
                                         </div>
                                     )}
@@ -530,7 +555,7 @@ function RegisterInner() {
                                                     type="button"
                                                     onClick={() => phoneOtp.send(watch('phone'))}
                                                     disabled={!isIndianMobile(watch('phone') ?? '') || phoneOtp.sending}
-                                                    className="h-12 px-5 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base disabled:opacity-60"
+                                                    className="h-12 rounded-xl bg-green-600 px-5 text-base font-semibold hover:bg-green-500 disabled:opacity-50"
                                                 >
                                                     {phoneOtp.sending && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
                                                     {t('auth.sendOtp')}
@@ -541,7 +566,7 @@ function RegisterInner() {
                                                         type="button"
                                                         onClick={() => verifyPhone(otpValue)}
                                                         disabled={otpValue.length !== OTP_LENGTH || phoneOtp.verifying}
-                                                        className="h-12 px-5 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base disabled:opacity-60"
+                                                        className="h-12 rounded-xl bg-green-600 px-5 text-base font-semibold hover:bg-green-500 disabled:opacity-50"
                                                     >
                                                         {phoneOtp.verifying && <Loader2 className="h-5 w-5 animate-spin mr-2" />}
                                                         {t('auth.verify')}
@@ -551,7 +576,7 @@ function RegisterInner() {
                                                         suppressHydrationWarning
                                                         onClick={() => { setOtpValue(''); phoneOtp.send(watch('phone')); }}
                                                         disabled={phoneOtp.secondsLeft > 0 || phoneOtp.sending}
-                                                        className="h-12 px-3 text-base font-semibold text-green-800 hover:underline disabled:text-gray-500 disabled:no-underline"
+                                                        className="h-12 px-3 text-base font-semibold text-green-200 hover:text-white hover:underline disabled:text-green-100/40 disabled:no-underline"
                                                     >
                                                         {phoneOtp.secondsLeft > 0
                                                             ? t('auth.resendIn', { seconds: phoneOtp.secondsLeft })
@@ -566,10 +591,10 @@ function RegisterInner() {
 
                             {/* ── Email OTP verification ── */}
                             {verifyBy === 'email' && (
-                            <div className="border-2 border-dashed border-gray-200 rounded-2xl p-4 space-y-3">
+                            <div className="space-y-3 rounded-2xl border-2 border-dashed border-white/20 bg-white/5 p-4">
                                 <div className="flex items-center gap-2">
-                                    <Mail className="h-4 w-4 text-green-700" />
-                                    <span className="text-base font-bold text-gray-800">Verify your email</span>
+                                    <Mail className="h-5 w-5 text-green-300" />
+                                    <span className="text-base font-bold text-white">Verify your email</span>
                                     {emailStep === 'verified' && (
                                         <span className="ml-auto flex items-center gap-1 text-xs font-bold text-green-600 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
                                             <CheckCircle2 className="h-3 w-3" /> Verified
@@ -578,15 +603,15 @@ function RegisterInner() {
                                 </div>
 
                                 {emailStep === 'verified' ? (
-                                    <div className="flex items-center gap-2 min-h-[48px] px-3 rounded-xl border-2 border-green-400 bg-green-50">
+                                    <div className="flex min-h-[48px] items-center gap-2 rounded-xl border-2 border-green-400 bg-green-600/20 px-3">
                                         <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
                                         {/* min-w-0 + truncate, or a long address pushes "Change" off a 360px screen */}
-                                        <span className="text-base font-semibold text-green-800 min-w-0 truncate">{emailVal}</span>
+                                        <span className="min-w-0 truncate text-base font-semibold text-green-100">{emailVal}</span>
                                         <button
                                             type="button"
                                             suppressHydrationWarning
                                             onClick={() => { setEmailStep('idle'); setEmailOtpValue(''); setValue('email', '', { shouldDirty: true }); }}
-                                            className="ml-auto flex-shrink-0 text-base text-gray-600 hover:text-gray-900 underline"
+                                            className="ml-auto flex-shrink-0 text-base text-green-200 underline hover:text-white"
                                         >
                                             Change
                                         </button>
@@ -604,13 +629,13 @@ function RegisterInner() {
                                                 disabled={emailStep === 'sending' || emailStep === 'verifying'}
                                                 inputMode="email"
                                                 autoComplete="email"
-                                                className={`flex-1 min-w-0 h-12 rounded-xl text-base ${errors.email ? 'border-red-500' : 'border-gray-300'}`}
+                                                className={`h-12 min-w-0 flex-1 rounded-xl border-white/20 bg-white/10 text-base text-white placeholder:text-green-100/50 focus-visible:ring-green-300 ${errors.email ? 'border-red-400' : ''}`}
                                             />
                                             <Button
                                                 type="button"
                                                 onClick={handleSendEmailOTP}
                                                 disabled={emailStep === 'sending' || emailStep === 'verifying' || emailTaken}
-                                                className="h-12 px-4 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base whitespace-nowrap disabled:opacity-60"
+                                                className="h-12 whitespace-nowrap rounded-xl bg-green-600 px-4 text-base font-semibold hover:bg-green-500 disabled:opacity-50"
                                             >
                                                 {emailStep === 'sending'
                                                     ? <Loader2 className="h-5 w-5 animate-spin" />
@@ -619,15 +644,15 @@ function RegisterInner() {
                                         </div>
                                         <FieldError name="email" />
                                         {emailTaken && !errors.email && (
-                                            <p className="text-amber-700 text-sm -mt-1">
+                                            <p className="-mt-1 text-sm text-amber-300">
                                                 This email is already registered.{' '}
-                                                <Link href="/login" className="underline font-semibold">Sign in instead</Link>
+                                                <Link href="/login" className="font-semibold text-white underline">Sign in instead</Link>
                                             </p>
                                         )}
 
                                         {(emailStep === 'awaiting_otp' || emailStep === 'verifying') && (
                                             <div className="space-y-1.5 pt-1">
-                                                <p className="text-base text-gray-700">OTP sent to <strong className="break-words">{emailVal}</strong> — check your inbox</p>
+                                                <p className="text-base text-green-100">OTP sent to <strong className="break-words">{emailVal}</strong> — check your inbox</p>
                                                 <div className="flex gap-2">
                                                     <input
                                                         type="text"
@@ -637,21 +662,21 @@ function RegisterInner() {
                                                         value={emailOtpValue}
                                                         onChange={e => { setEmailOtpValue(e.target.value.replace(/\D/g, '').slice(0, 6)); setEmailOtpError(''); }}
                                                         maxLength={6}
-                                                        className="flex-1 min-w-0 border-2 border-gray-300 rounded-xl px-3 h-12 text-base tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
+                                                        className="h-12 min-w-0 flex-1 rounded-xl border-2 border-white/25 bg-white/10 px-3 font-mono text-base tracking-widest text-white focus:outline-none focus:ring-2 focus:ring-green-300"
                                                         autoFocus
                                                     />
                                                     <Button
                                                         type="button"
                                                         onClick={handleVerifyEmailOTP}
                                                         disabled={emailOtpValue.length !== 6 || emailStep === 'verifying'}
-                                                        className="h-12 px-5 bg-green-700 hover:bg-green-800 rounded-xl font-semibold text-base disabled:opacity-60"
+                                                        className="h-12 rounded-xl bg-green-600 px-5 text-base font-semibold hover:bg-green-500 disabled:opacity-50"
                                                     >
                                                         {emailStep === 'verifying' ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Verify'}
                                                     </Button>
                                                 </div>
                                             </div>
                                         )}
-                                        {emailOtpError && <p className="text-red-600 text-sm">{emailOtpError}</p>}
+                                        {emailOtpError && <p className="text-sm text-red-300">{emailOtpError}</p>}
                                     </>
                                 )}
                             </div>
@@ -661,13 +686,13 @@ function RegisterInner() {
                             <div className={`space-y-3 transition-opacity duration-300 ${!verified ? 'opacity-40 pointer-events-none select-none' : ''}`}>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div className="sm:col-span-2">
-                                        <Label htmlFor="name" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.name')} *</Label>
+                                        <Label htmlFor="name" className="mb-1.5 block text-base font-semibold text-green-50">{t('auth.name')} *</Label>
                                         <Input id="name" placeholder="Raju Reddy" {...register('name')} className={fieldCls('name')} />
                                         <FieldError name="name" />
                                     </div>
 
                                     <div className="sm:col-span-2">
-                                        <Label htmlFor="phone" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.phone')} *</Label>
+                                        <Label htmlFor="phone" className="mb-1.5 block text-base font-semibold text-green-50">{t('auth.phone')} *</Label>
                                         <div className={`flex items-center rounded-xl overflow-hidden border ${errors.phone ? 'border-red-400' : 'border-gray-200'} focus-within:ring-2 focus-within:ring-green-500`}>
                                             <span className="px-3 text-base font-semibold text-gray-700 border-r border-gray-300 bg-gray-100 h-12 flex items-center select-none">+91</span>
                                             <input
@@ -685,35 +710,35 @@ function RegisterInner() {
                                         {phoneTaken && !errors.phone && (
                                             <p className="text-amber-600 text-xs mt-1">
                                                 This phone number is already linked to an account.{' '}
-                                                <Link href="/login" className="underline font-semibold">Sign in</Link>
+                                                <Link href="/login" className="font-semibold text-white underline">Sign in</Link>
                                             </p>
                                         )}
                                     </div>
 
                                     <div>
-                                        <PincodeField onResolved={handlePincodeResolved} />
+                                        <PincodeField onResolved={handlePincodeResolved} tone="dark" />
                                     </div>
                                     <div>
-                                        <Label htmlFor="village" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.village')}</Label>
+                                        <Label htmlFor="village" className="mb-1.5 block text-base font-semibold text-green-50">{t('auth.village')}</Label>
                                         <Input id="village" placeholder={t('register.autoFilled')} {...register('village')} className={fieldCls('village')} />
                                     </div>
                                     <div>
-                                        <Label htmlFor="district" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.district')}</Label>
+                                        <Label htmlFor="district" className="mb-1.5 block text-base font-semibold text-green-50">{t('auth.district')}</Label>
                                         <Input id="district" placeholder={t('register.autoFilled')} {...register('district')} className={fieldCls('district')} />
                                     </div>
                                     <div>
-                                        <Label htmlFor="state" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.state')}</Label>
+                                        <Label htmlFor="state" className="mb-1.5 block text-base font-semibold text-green-50">{t('auth.state')}</Label>
                                         <Input id="state" placeholder={t('register.autoFilled')} {...register('state')} className={fieldCls('state')} />
                                     </div>
 
                                     <div>
-                                        <Label htmlFor="password" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.passwordLabel')} *</Label>
+                                        <Label htmlFor="password" className="mb-1.5 block text-base font-semibold text-green-50">{t('auth.passwordLabel')} *</Label>
                                         <div className="relative">
                                             <Input id="password" type={showPass ? 'text' : 'password'} placeholder={t('register.passwordPlaceholder')}
                                                 {...register('password', { onChange: e => setPasswordValue(e.target.value) })}
                                                 className={`${fieldCls('password')} pr-14`} />
                                             <button type="button" suppressHydrationWarning aria-label={showPass ? 'Hide password' : 'Show password'} onClick={() => setShowPass(v => !v)}
-                                                className="absolute right-0 top-0 h-12 w-12 flex items-center justify-center text-gray-500 hover:text-gray-800">
+                                                className="absolute right-0 top-0 flex h-12 w-12 items-center justify-center text-green-100/70 hover:text-white">
                                                 {showPass ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                             </button>
                                         </div>
@@ -722,12 +747,12 @@ function RegisterInner() {
                                     </div>
 
                                     <div>
-                                        <Label htmlFor="confirmPassword" className="mb-1.5 block text-base font-semibold text-gray-800">{t('auth.confirmPassword')} *</Label>
+                                        <Label htmlFor="confirmPassword" className="mb-1.5 block text-base font-semibold text-green-50">{t('auth.confirmPassword')} *</Label>
                                         <div className="relative">
                                             <Input id="confirmPassword" type={showConf ? 'text' : 'password'} placeholder="Re-enter password"
                                                 {...register('confirmPassword')} className={`${fieldCls('confirmPassword')} pr-14`} />
                                             <button type="button" suppressHydrationWarning aria-label={showConf ? 'Hide password' : 'Show password'} onClick={() => setShowConf(v => !v)}
-                                                className="absolute right-0 top-0 h-12 w-12 flex items-center justify-center text-gray-500 hover:text-gray-800">
+                                                className="absolute right-0 top-0 flex h-12 w-12 items-center justify-center text-green-100/70 hover:text-white">
                                                 {showConf ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                             </button>
                                         </div>
@@ -739,7 +764,7 @@ function RegisterInner() {
                             <Button
                                 type="submit"
                                 size="lg"
-                                className="w-full h-14 bg-green-700 hover:bg-green-800 rounded-xl font-bold text-lg disabled:opacity-60"
+                                className="h-14 w-full rounded-xl bg-gradient-to-r from-green-600 via-green-500 to-emerald-500 text-lg font-bold text-white shadow-lg shadow-green-900/50 transition-all hover:brightness-110 disabled:opacity-50"
                                 disabled={isSubmitting || !verified}
                             >
                                 {isSubmitting
@@ -750,18 +775,18 @@ function RegisterInner() {
                             </Button>
                         </form>
 
-                        <p className="text-center text-base text-gray-700 mt-5">
+                        <p className="mt-5 text-center text-base text-green-100/90">
                             {t('auth.alreadyHaveAccount')}{' '}
-                            <Link href="/login" className="text-green-800 font-bold hover:underline">{t('auth.signIn')}</Link>
+                            <Link href="/login" className="font-bold text-green-200 hover:text-white hover:underline">{t('auth.signIn')}</Link>
                         </p>
 
-                        <NeedHelpButton />
+                        <NeedHelpButton tone="dark" />
 
-                        <p className="text-center text-sm text-gray-600 mt-4 leading-relaxed">
+                        <p className="mt-4 text-center text-sm leading-relaxed text-green-100/70">
                             {t('register.termsAgreement')}{' '}
-                            <Link href="/" className="underline hover:text-gray-600">{t('register.termsOfService')}</Link>
+                            <Link href="/" className="underline hover:text-white">{t('register.termsOfService')}</Link>
                             {' '}{t('register.and')}{' '}
-                            <Link href="/" className="underline hover:text-gray-600">{t('register.privacyPolicy')}</Link>.
+                            <Link href="/" className="underline hover:text-white">{t('register.privacyPolicy')}</Link>.
                         </p>
                     </div>
                 </div>

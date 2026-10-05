@@ -8,6 +8,7 @@ repository root brings up. Start there:
 
 - **[Root README](../README.md)** — architecture, how to run the stack locally, tests, deployment
 - **Live site — <https://farmrentcom.in>**
+- **Render host — <https://farmrent-l9gk.onrender.com>**
 
 ```bash
 # from the repository root, not from here

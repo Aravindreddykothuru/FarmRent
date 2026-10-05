@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import type { Tone } from '@/components/AuthAssist';
 
 export interface PincodeResult {
     pincode: string;
@@ -20,6 +21,8 @@ interface Props {
     required?: boolean;
     className?: string;
     error?: string;
+    /** 'dark' when the field sits on the auth screens' glass card. */
+    tone?: Tone;
 }
 
 type Status = 'idle' | 'loading' | 'found' | 'invalid';
@@ -43,7 +46,8 @@ async function lookupPincode(pincode: string): Promise<PincodeResult | null> {
     };
 }
 
-export default function PincodeField({ value: valueProp, onChange, onResolved, label = 'PIN Code', required, className, error }: Props) {
+export default function PincodeField({ value: valueProp, onChange, onResolved, label = 'PIN Code', required, className, error, tone = 'light' }: Props) {
+    const dark = tone === 'dark';
     const [internalValue, setInternalValue] = useState('');
     const value = valueProp ?? internalValue;
     const [status, setStatus] = useState<Status>('idle');
@@ -88,7 +92,7 @@ export default function PincodeField({ value: valueProp, onChange, onResolved, l
 
     return (
         <div className={className}>
-            <Label htmlFor="pincode-input" className="mb-1.5 block text-base font-semibold text-gray-800">
+            <Label htmlFor="pincode-input" className={`mb-1.5 block text-base font-semibold ${dark ? 'text-green-50' : 'text-gray-800'}`}>
                 {label} {required && <span className="text-red-500">*</span>}
             </Label>
             <div className="relative">
@@ -100,7 +104,7 @@ export default function PincodeField({ value: valueProp, onChange, onResolved, l
                     placeholder="6-digit PIN code"
                     value={value}
                     onChange={e => handleChange(e.target.value)}
-                    className={`h-12 rounded-xl text-base pr-10 ${error ? 'border-red-500 focus-visible:ring-red-500' : 'border-gray-300'}`}
+                    className={`h-12 rounded-xl pr-10 text-base ${dark ? 'border-white/20 bg-white/10 text-white placeholder:text-green-100/50 focus-visible:ring-green-300' : 'border-gray-300'} ${error ? 'border-red-400' : ''}`}
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
                     {status === 'loading' && <Loader2 className="h-5 w-5 animate-spin text-gray-500" />}
@@ -111,13 +115,13 @@ export default function PincodeField({ value: valueProp, onChange, onResolved, l
 
             {/* Feedback message */}
             {status === 'found' && result && (
-                <p className="text-sm text-green-800 font-medium mt-1.5 flex items-center gap-1.5">
+                <p className={`mt-1.5 flex items-center gap-1.5 text-sm font-medium ${dark ? 'text-green-200' : 'text-green-800'}`}>
                     <CheckCircle2 className="h-3 w-3" />
                     Location found: {result.town}, {result.state}
                 </p>
             )}
             {status === 'invalid' && (
-                <p className="text-sm text-red-600 mt-1.5 flex items-center gap-1.5">
+                <p className={`mt-1.5 flex items-center gap-1.5 text-sm ${dark ? 'text-red-300' : 'text-red-600'}`}>
                     <XCircle className="h-3 w-3" />
                     Invalid PIN code — please check
                 </p>
