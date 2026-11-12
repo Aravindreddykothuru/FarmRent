@@ -118,6 +118,8 @@ function buildBackendApplication() {
     require('./workers/invoiceWorker');
     require('./workers/cronWorker');
     require('./workers/imageWorker');
+    // Twice-daily activity of the application's own, so a quiet week does not get the database paused.
+    require('./lib/keepAlive').startKeepAlive(supabase);
 
     app.use('/api/v1/admin', auth(true), requireRole('admin'), require('./services/admin-service/routes'));
     const { queuesRouter } = require('./lib/queueManager');
