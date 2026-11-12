@@ -1,0 +1,78 @@
+name: Uptime
+
+# Asks the live site, every hour, whether it can actually serve people — not whether a process is running.
+#
+# The site was down for three weeks and nothing said so. Render had suspended the account over billing; when it
+# was resumed the web service came back, the Redis store did not, and the Supabase project had been paused in
+# the meantime for inactivity. Every page that needed data answered 500. Render's health check stayed green
+# throughout, because /health only reports that the process is alive — which it was.
+#
+# /health/full runs a real query. A failing run here is emailed by GitHub to whoever last changed this file,
+# and shows red in the Actions tab.
+#
+# It has a second job. Supabase pauses a free project after a week without requests, and the query this check
+# makes is a request: while this runs, the project is never idle for long enough to be paused.
+#
+# GitHub turns scheduled workflows off after 60 days without a commit to the repository. If that happens the
+# Actions tab says so, with a button to turn them back on.
+on:
+  schedule:
+    # Hourly is often enough to hear about an outage the same hour, and seldom enough that a long one does not
+    # bury the inbox. Off the hour, because scheduled runs queue behind everyone else's at :00 and start late.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Database and Redis answer
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SITE_URL: ${{ vars.SITE_URL || 'https://farmrentcom.in' }}
+    steps:
+      - name: Ask the site
+        run: |
+          set -uo pipefail
+
+          # Three tries, half a minute apart: one dropped request is not an outage, and a restart during a
+          # deploy takes about that long.
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o health.json -w '%{http_code}' --max-time 45 "$SITE_URL/health/full" 2>curl.err) || code=000
+            db=$(jq -r '.dependencies.database.reachable // false' health.json 2>/dev/null || echo false)
+            redis=$(jq -r '.dependencies.redis.isReady // false' health.json 2>/dev/null || echo false)
+            echo "attempt $attempt: HTTP $code, database reachable=$db, redis ready=$redis"
+            [ "$db" = "true" ] && [ "$redis" = "true" ] && break
+            [ "$attempt" -lt 3 ] && sleep 30
+          done
+
+          {
+            echo "### $SITE_URL"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Site answers | HTTP $code |"
+            echo "| Database | $db |"
+            echo "| Redis | $redis |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          failed=0
+          if [ "$code" = "000" ]; then
+            echo "::error::$SITE_URL did not answer at all: $(cat curl.err 2>/dev/null). Check the web service in the Render dashboard - a billing suspension stops it without any deploy failing."
+            exit 1
+          fi
+          if [ "$db" != "true" ]; then
+            reason=$(jq -r '.dependencies.database.error // "no reason given"' health.json 2>/dev/null || echo "unreadable response")
+            echo "::error::The site is up but cannot reach its database ($reason). Open the project in the Supabase dashboard: a paused project has a Restore button, and its address stops resolving until it is pressed."
+            failed=1
+          fi
+          if [ "$redis" != "true" ]; then
+            echo "::error::The site is up but Redis is not ready. Sessions, rate limits and the email queue are running on in-memory fallbacks. Open farmrent-redis in the Render dashboard and resume it if it is suspended."
+            failed=1
+          fi
+          exit $failed

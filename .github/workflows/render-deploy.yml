@@ -123,7 +123,19 @@ jobs:
           set -euo pipefail
           # "live" means Render started the container. It does not mean the application is serving, so the
           # release is not called good until the process says so itself.
-          body=$(curl -sS --fail-with-body --retry 10 --retry-delay 5 --retry-all-errors --max-time 45 \
-            "${SERVICE_URL}/health")
-          echo "$body"
-          jq -e '.status == "ok"' <<<"$body" > /dev/null
+          #
+          # /health/full, not /health. /health answers "ok" for as long as the process is alive, and it went on
+          # saying so for three weeks while the database behind it was gone. This one runs a query.
+          #
+          # Written to a file so that a retry replaces the previous answer instead of being appended to it.
+          if ! curl -sS --fail-with-body --retry 10 --retry-delay 5 --retry-all-errors --max-time 45 \
+            -o health.json "${SERVICE_URL}/health/full"; then
+            cat health.json 2>/dev/null || true
+            echo
+            echo "::error::The release is running but is not healthy: see the answer above. If the database is \
+          unreachable, the release is not the cause - check the Supabase project (a paused one has a Restore button)."
+            exit 1
+          fi
+          cat health.json
+          echo
+          jq -e '.status == "healthy" and .dependencies.database.reachable == true' health.json > /dev/null

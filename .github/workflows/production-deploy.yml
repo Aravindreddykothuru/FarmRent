@@ -1,8 +1,12 @@
 name: Production Deploy
 
+# The image-to-EKS path. Nothing is deployed this way today: the live site runs on Render and is shipped by
+# render-deploy.yml. There is no cluster, registry or AWS credential behind this workflow, so while it ran on
+# every push to main it failed on every push to main — a red mark and an email for a release that was never
+# attempted. It now runs only when started by hand, which is when it should run if that infrastructure is
+# ever built.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
