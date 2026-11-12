@@ -367,6 +367,20 @@ idle long enough to be paused.
 While the database is away the API answers `503 DB_UNAVAILABLE` with a `Retry-After`, and people see
 "FarmRent is temporarily unavailable" rather than a server error.
 
+**The database was replaced on 12 November 2026.** The paused project could not be restored: it belongs to
+a Supabase login nobody could sign in to that day. The site now runs on a new project in Singapore (the
+same region as the web service), created empty with all migrations applied, a public `farmrent-assets`
+bucket and its own storage keys. Accounts, listings, bookings and photos from before that date are still in
+the old project, which exists and is only paused. To bring them back, sign in to Supabase with the login
+that owns it, restore it, and either copy its data across or point the service back at it: the nine settings
+the service had before the switch are kept in `.env.render-backup-2026-11-12` beside this file (gitignored,
+so only on the machine the switch was made from). A paused project can be restored from the dashboard for
+90 days; after that Supabase offers only a backup download.
+
+A new database has no administrator. Register on the site, then add a row to the `user_roles` table with
+that account's `user_id` and `role_id` 4, the `admin` role (Supabase dashboard → Table Editor); nothing in
+the application can grant it.
+
 ---
 
 ### Database Migrations on Render / Supabase
