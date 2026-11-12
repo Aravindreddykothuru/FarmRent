@@ -25,6 +25,7 @@ const { idempotency } = require('../../middleware/idempotency');
 const { validate } = require('../../middleware/validate');
 const { createOrderSchema, verifyPaymentSchema, partialRefundSchema } = require('../../validations/schemas');
 const { refundBookingPayment } = require('./refunds');
+const { onlinePaymentsAvailable } = require('./availability');
 
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -37,11 +38,8 @@ function db() {
 function razorpayClient() {
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
-    if (!keyId || !keySecret) {
-        throw new HttpError(503, 'PAYMENTS_UNAVAILABLE', 'Online payments are not available right now. Please choose cash on delivery.');
-    }
-    if (!/^rzp_(live|test)_/.test(keyId)) {
-        logger.error('[payment] RAZORPAY_KEY_ID must start with rzp_live_ or rzp_test_');
+    if (!onlinePaymentsAvailable()) {
+        if (keyId && keySecret) logger.error('[payment] RAZORPAY_KEY_ID must start with rzp_live_ or rzp_test_');
         throw new HttpError(503, 'PAYMENTS_UNAVAILABLE', 'Online payments are not available right now. Please choose cash on delivery.');
     }
     if (process.env.NODE_ENV === 'production' && keyId.startsWith('rzp_test_')) {
