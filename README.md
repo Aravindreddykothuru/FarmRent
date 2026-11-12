@@ -47,7 +47,7 @@ Browser / PWA (Next.js 16 App Router, React 19, Socket.IO client)
 - **Business rules live on the server**: prices are computed from the listing (the client's amounts are ignored), the rental state machine is enforced by conditional updates, and a Postgres exclusion constraint makes double-booking impossible even under concurrent requests.
 - **Auth**: short-lived JWT access token (15 min) in an httpOnly cookie, rotating refresh token stored hashed in Redis with reuse detection, server-side session list with remote sign-out.
 - **Real-time telemetry**: Socket.IO `/tracking` namespace for booking-scoped GPS coordinates and live breadcrumbs, and `/notifications` for push updates.
-- **Resilient messaging & fallbacks**: Phone OTP verification through 2Factor.in AUTOGEN (falling back to logged OTP in dev environments). Email transmission via dual-provider failover: MSG91 primary, Gmail SMTP secondary.
+- **Resilient messaging & fallbacks**: Phone OTP verification through 2Factor.in AUTOGEN (falling back to logged OTP in dev environments). Email transmission via dual-provider failover: Gmail SMTP first, MSG91 when it refuses or fails (the order is `EMAIL_PROVIDERS`).
 
 ### Rental lifecycle
 
@@ -123,7 +123,7 @@ signing. The number is proved by OTP; the address is not, and the account does n
 | Languages | 10 — English, Hindi, Telugu, Tamil, Kannada, Marathi, Punjabi, Bengali, Gujarati, Malayalam (`nextfrontend/messages/`) |
 | Hosting | Render web service from `Dockerfile` (blueprint in `render.yaml`), Render Key Value for Redis, Supabase for Postgres (live at <https://farmrentcom.in> & <https://farmrent-l9gk.onrender.com>) |
 | Tests | Jest + Supertest (unit, integration, API contract), HTTP acceptance script, Playwright-driven browser smoke |
-| CI / CD | GitHub Actions — `ci.yml` (tests), `render-deploy.yml` (live site), `production-deploy.yml` (ECR/EKS image) |
+| CI / CD | GitHub Actions — `ci.yml` (tests), `render-deploy.yml` (ships the live site), `uptime.yml` (checks the live site's database and Redis every hour), `production-deploy.yml` (ECR/EKS image; started by hand only, nothing runs on it today) |
 
 ---
 
@@ -234,8 +234,8 @@ The production stack is deployed on **Render** (migrated away from Railway), bac
 |---|---|---|
 | **Production Domain** | **<https://farmrentcom.in>** | Primary custom domain with SSL |
 | **Render Host URL** | **<https://farmrent-l9gk.onrender.com>** | Direct Render service domain (fallback & direct health check) |
-| **API Health Check** | <https://farmrentcom.in/health> | Liveness endpoint checked every 30s by Render |
-| **Deep Health Check** | <https://farmrentcom.in/health/full> | Diagnostic check verifying database and Redis connectivity |
+| **API Health Check** | <https://farmrentcom.in/health> | Liveness only: "the process answers". Checked by Render. It says `ok` even when the database is away |
+| **Deep Health Check** | <https://farmrentcom.in/health/full> | Runs a real query and reports Redis. Checked every hour by [Actions → Uptime](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/uptime.yml), and after every deploy |
 | **API Documentation** | <https://farmrentcom.in/api-docs> | Interactive Swagger / OpenAPI documentation |
 | **Release Monitor** | [Actions → Render Deploy](https://github.com/Aravindreddykothuru/FarmRent/actions/workflows/render-deploy.yml) | Gated CI/CD releases |
 
@@ -342,6 +342,33 @@ Instead of deploying unvalidated code on every push, production releases are con
 
 ---
 
+### When the site is down
+
+Open <https://farmrentcom.in/health/full> first. It names what is missing, and each answer has one cause that
+has actually happened here.
+
+| What `/health/full` says | What happened | What to do |
+|---|---|---|
+| Nothing — the address does not answer | Render suspended the web service, usually over billing | Render dashboard → Billing, settle it; the service resumes by itself |
+| `database.reachable: false`, `fetch failed` | The Supabase project is paused. A free project is paused after a week without requests, and its address stops existing until it is restored | Supabase dashboard → the project → **Restore project**. Nothing is lost; it takes a few minutes |
+| `redis.isReady: false` | The `farmrent-redis` Key Value store is suspended. A billing suspension stops it along with the web service, and resuming the account does **not** bring it back | Render dashboard → `farmrent-redis` → **Resume**, then restart the web service |
+
+Restart the web service after Redis comes back (Render dashboard → **Manual Deploy → Restart service**). The
+sign-in and rate-limit code reconnects by itself, but the email and notification queues stop trying if Redis
+was missing when the process started, and stay off until the next start.
+
+These three happened together in October 2026: a billing suspension stopped the service for nine days, the
+database was paused for inactivity while it was stopped, and Redis stayed suspended after the account was
+resumed. The site answered 500 on every page for three weeks with a green health check. The **Uptime**
+workflow exists so that the next time is noticed within the hour — a failed run is emailed to whoever last
+changed `.github/workflows/uptime.yml` — and because its query counts as a request, the database is no longer
+idle long enough to be paused.
+
+While the database is away the API answers `503 DB_UNAVAILABLE` with a `Retry-After`, and people see
+"FarmRent is temporarily unavailable" rather than a server error.
+
+---
+
 ### Database Migrations on Render / Supabase
 
 Database migrations are managed via `Backend_Node_legacy/db/migrate.js` and should be run before deploying code changes that require schema alterations:
@@ -375,7 +402,9 @@ DATABASE_URL="postgresql://postgres.<project-ref>:[PASSWORD]@aws-0-[region].pool
 | `DATABASE_URL` | Yes | `postgresql://...` | Supabase IPv4 Session Pooler connection string for migrations |
 | `TWOFACTOR_API_KEY` | Optional | Dashboard secret | 2Factor.in API key for SMS OTP authentication |
 | `TWOFACTOR_TEMPLATE`| Optional | `""` | DLT approved template name (or empty for 2Factor default) |
-| `EMAIL_PROVIDERS` | Optional | `msg91,smtp` | Comma-separated list of enabled email delivery backends |
+| `EMAIL_PROVIDERS` | Optional | `smtp,msg91` | Email delivery backends, tried in this order |
+| `AWS_S3_ENDPOINT`, `AWS_S3_PUBLIC_URL`, `AWS_S3_BUCKET`, `AWS_REGION` | **Yes** | Supabase storage's S3 address and bucket | Where uploaded photos and documents are kept. Without them uploads go to the container's disk and are lost at the next deploy |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | **Yes** | Dashboard secret | S3 access keys for that bucket (Supabase → Storage → S3 access keys) |
 | `EMAIL_PROVIDER` | Optional | `smtp` | Primary email driver |
 | `SMTP_HOST` / `PORT`| Optional | `smtp.gmail.com` / `587` | SMTP relay server settings |
 | `SMTP_USER` / `PASS`| Optional | `farmrent862@gmail.com` | SMTP credentials |

@@ -10,13 +10,18 @@ services:
   - type: web
     name: farmrent
     runtime: docker
-    plan: free
+    # Starter, not free: a free web service sleeps after fifteen idle minutes and takes most of a minute to
+    # wake, which on a phone on a slow connection is a site that does not load.
+    plan: starter
     region: singapore
     branch: audit/farmrent-refactor
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    # Liveness only — "the process answers". Render restarts a service that fails this, and restarting does
+    # nothing for a database that is away, so the deeper /health/full is watched by the Uptime workflow instead.
     healthCheckPath: /health
-    autoDeploy: true
+    # Off: .github/workflows/render-deploy.yml ships the service, and only a commit that passed the tests.
+    autoDeploy: false
     envVars:
       - key: NODE_ENV
         value: production
@@ -60,7 +65,23 @@ services:
       - key: NEXT_PUBLIC_APP_URL
         value: https://farmrentcom.in
       - key: ALLOWED_ORIGINS
-        value: https://farmrentcom.in,https://www.farmrentcom.in
+        value: https://farmrentcom.in,https://www.farmrentcom.in,https://farmrent-l9gk.onrender.com
+
+      # Photos and documents people upload. The container's own disk is replaced on every deploy, so they are
+      # kept in an S3-compatible bucket — the Supabase project's storage. Without these the app writes to that
+      # disk and every upload disappears with the next release.
+      - key: AWS_S3_ENDPOINT
+        sync: false
+      - key: AWS_S3_PUBLIC_URL
+        sync: false
+      - key: AWS_S3_BUCKET
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
 
       # Signing in and up by mobile number. The key is entered in the Render dashboard and never committed;
       # without it the phone endpoints have no way to send an SMS in production and return 503.
@@ -70,9 +91,9 @@ services:
       - key: TWOFACTOR_TEMPLATE
         value: ""
 
-      # Email: MSG91 first, Gmail SMTP when MSG91 refuses or fails.
+      # Email: Gmail SMTP first, MSG91 when it refuses or fails. This is the order the live service runs with.
       - key: EMAIL_PROVIDERS
-        value: msg91,smtp
+        value: smtp,msg91
       - key: EMAIL_PROVIDER
         value: smtp
       - key: EMAIL_FROM
