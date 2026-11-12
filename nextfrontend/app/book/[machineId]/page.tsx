@@ -37,7 +37,7 @@ interface Quote {
     available: boolean;
     promoLabel: string | null;
 }
-interface PricingSettings { serviceFeePercent: number; deliveryCharge: number }
+interface PricingSettings { serviceFeePercent: number; deliveryCharge: number; onlinePayments?: boolean }
 interface CreatedBooking { id: string; totalAmount: number }
 
 type Step = 1 | 2;
@@ -93,6 +93,9 @@ export default function BookPage() {
             setMachine(machineData);
             setBooked(Array.isArray(ranges) ? ranges : []);
             setPricing(settings);
+            // Online payment is pre-selected, so where the server cannot take one the choice has to move:
+            // otherwise the default is a booking the owner confirms and the renter then cannot pay for.
+            if (settings?.onlinePayments === false) setGateway('cod');
         }).catch((e: unknown) => toast.error(errorMessage(e, 'Could not load machine')))
             .finally(() => setLoading(false));
     }, [machineId]);
@@ -185,6 +188,9 @@ export default function BookPage() {
         toast.success('Booking request sent! You can pay once the owner confirms it.');
         router.push(`/bookings/${encodeURIComponent(created.id)}`);
     };
+
+    // Unless the server says otherwise: an answer without the flag is treated as it always was.
+    const onlinePayments = pricing?.onlinePayments !== false;
 
     const today = todayStr();
     const upcomingConflicts = booked.filter(b => b.end_date >= today).slice(0, 3);
@@ -466,8 +472,8 @@ export default function BookPage() {
                                 {/* ── Payment Method ── */}
                                 <div>
                                     <p className="text-sm font-semibold mb-2">How will you pay?</p>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <button
+                                    <div className={`grid gap-3 ${onlinePayments ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                        {onlinePayments && <button
                                             type="button"
                                             onClick={() => setGateway('razorpay')}
                                             className={`flex flex-col items-center gap-1.5 border-2 rounded-2xl p-4 transition-all text-sm font-semibold ${
@@ -480,7 +486,7 @@ export default function BookPage() {
                                             <span>Online Payment</span>
                                             <span className="text-[10px] font-normal text-gray-500">UPI, Card, Netbanking</span>
                                             <span className="text-[10px] font-bold text-green-700">Refunded if declined</span>
-                                        </button>
+                                        </button>}
                                         <button
                                             type="button"
                                             onClick={() => setGateway('cod')}
@@ -496,6 +502,11 @@ export default function BookPage() {
                                             <span className="text-[10px] font-bold text-amber-600">No advance needed</span>
                                         </button>
                                     </div>
+                                    {!onlinePayments && (
+                                        <p className="mt-2 text-xs text-gray-500">
+                                            Online payment is not available yet. You pay the owner in cash when the equipment arrives.
+                                        </p>
+                                    )}
                                 </div>
 
                                 <Button

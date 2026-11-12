@@ -27,6 +27,7 @@ const { getRouteWithFallback } = require('../routing-service/osrm');
 const { emitBookingStatusChange } = require('../tracking-service/socket');
 const { redisClient, getHasGeoSupport } = require('../tracking-service/redisClient');
 const { refundBookingPayment } = require('../payment-service/refunds');
+const { onlinePaymentsAvailable } = require('../payment-service/availability');
 const lifecycle = require('./lifecycle');
 const pricing = require('./pricing');
 
@@ -357,6 +358,9 @@ router.get('/pricing', (req, res) => {
         serviceFeePercent: pricing.SERVICE_FEE_RATE * 100,
         deliveryCharge: pricing.DELIVERY_CHARGE,
         maxRentalDays: pricing.MAX_RENTAL_DAYS,
+        // Lets the page offer only the ways of paying that will work. Without Razorpay keys a booking made
+        // as "online payment" is confirmed by the owner and then cannot be paid for.
+        onlinePayments: onlinePaymentsAvailable(),
     });
 });
 
