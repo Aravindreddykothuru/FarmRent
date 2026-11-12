@@ -9,10 +9,13 @@ import Footer from "@/components/Footer";
 import ApiHealthPing from "@/components/ApiHealthPing";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LanguageModal } from "@/components/LanguageSwitcher";
+import { SITE_URL } from "@/lib/siteUrl";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
+  // Makes the icon and Open Graph addresses absolute, which is what a link preview needs to fetch them.
+  metadataBase: new URL(SITE_URL),
   title: "FarmRent — Farm Equipment Rental",
   description: "Rent farm machinery directly from local owners. Tractors, harvesters, tillers and more.",
   keywords: "farm equipment rental, tractor rental, harvester rental, agri machinery India",
